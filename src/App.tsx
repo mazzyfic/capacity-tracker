@@ -76,7 +76,12 @@ export default function App() {
     return syncRollingWeeksAndAllocations(getDefaultTeamData(activeId));
   });
 
-  // 1. Sync Teams Registry with Firestore
+  // Keep browser tab title strictly as FFID Capacity Tracker
+  useEffect(() => {
+    document.title = 'FFID Capacity Tracker';
+  }, []);
+
+  // 1. Sync Teams Registry with Firestore & auto-repair names
   useEffect(() => {
     const regRef = doc(db, FIRESTORE_COLLECTION, 'teams_registry');
     const unsubscribe = onSnapshot(
@@ -85,10 +90,30 @@ export default function App() {
         if (snapshot.exists()) {
           const data = snapshot.data();
           if (Array.isArray(data?.teams) && data.teams.length > 0) {
-            setTeamsList(data.teams);
+            let hasChanged = false;
+            const normalizedTeams = data.teams.map((t: any) => {
+              if (t.id === 'theglobal5' || t.name === 'FFID' || t.name === 'TheGlobal5') {
+                if (t.name !== 'Team Mazzy' || t.leadName !== 'Mazzy') hasChanged = true;
+                return { ...t, id: 'theglobal5', name: 'Team Mazzy', leadName: 'Mazzy' };
+              }
+              if (t.id === 'team_marcus' || t.name === 'Team Marcus' || t.id === 'team_kimyatta') {
+                if (t.name !== 'Team Kimyatta' || t.leadName !== 'Kimyatta') hasChanged = true;
+                return { ...t, id: 'team_kimyatta', name: 'Team Kimyatta', leadName: 'Kimyatta' };
+              }
+              if (t.id === 'team_lindsay') {
+                return { ...t, name: 'Team Lindsay', leadName: 'Lindsay' };
+              }
+              return t;
+            });
+            setTeamsList(normalizedTeams);
             try {
-              localStorage.setItem('g5_teams_list_v1', JSON.stringify(data.teams));
+              localStorage.setItem('g5_teams_list_v1', JSON.stringify(normalizedTeams));
             } catch (e) {}
+
+            // Persist repaired names back to Firestore if legacy names existed
+            if (hasChanged) {
+              setDoc(regRef, { teams: normalizedTeams }, { merge: true }).catch(console.error);
+            }
           }
         } else {
           // Initialize teams registry document
@@ -111,7 +136,9 @@ export default function App() {
     setCloudStatus('syncing');
 
     // Document ID for active team
-    const docId = currentTeamId === 'theglobal5' ? 'theglobal5_state' : `team_${currentTeamId}`;
+    const docId = (currentTeamId === 'theglobal5' || currentTeamId === 'team_mazzy') 
+      ? 'theglobal5_state' 
+      : (currentTeamId === 'team_marcus' || currentTeamId === 'team_kimyatta' ? 'team_team_kimyatta' : `team_${currentTeamId}`);
     const docRef = doc(db, FIRESTORE_COLLECTION, docId);
     
     const unsubscribe = onSnapshot(
@@ -120,8 +147,61 @@ export default function App() {
         if (snapshot.exists()) {
           const remoteData = snapshot.data() as AppData;
           if (remoteData && Array.isArray(remoteData.staff) && remoteData.staff.length > 0) {
+            const cleanedData = { ...remoteData };
+            
+            // Clean up Team 1 (Team Mazzy)
+            if (currentTeamId === 'theglobal5' || currentTeamId === 'team_mazzy') {
+              if (cleanedData.teamTitle === 'TheGlobal5 Capacity Tracker' || cleanedData.teamTitle === 'FFID Capacity Tracker' || cleanedData.teamTitle === 'Team Mazzy Capacity Tracker' || !cleanedData.teamTitle) {
+                cleanedData.teamTitle = 'Team Mazzy';
+              }
+              const mazzyMember = cleanedData.staff.find(s => s.name.toLowerCase() === 'mazzy');
+              if (mazzyMember && cleanedData.teamLeadId !== mazzyMember.id) {
+                cleanedData.teamLeadId = mazzyMember.id;
+              }
+            }
+
+            // Clean up Team 2 (Team Lindsay)
+            if (currentTeamId === 'team_lindsay') {
+              if (cleanedData.teamTitle === 'Team Lindsay Capacity Tracker' || !cleanedData.teamTitle) {
+                cleanedData.teamTitle = 'Team Lindsay';
+              }
+            }
+
+            // Clean up Team 3 (Team Kimyatta)
+            if (currentTeamId === 'team_kimyatta' || currentTeamId === 'team_marcus') {
+              if (cleanedData.teamTitle === 'Team Marcus Capacity Tracker' || cleanedData.teamTitle === 'Team Kimyatta Capacity Tracker' || !cleanedData.teamTitle) {
+                cleanedData.teamTitle = 'Team Kimyatta';
+              }
+              const targetNames = ['Anna', 'Belle', 'Caroline', 'Jenna', 'Kelley', 'Kimyatta'];
+              // Ensure the staff names are locked to the target names in alphabetical order
+              if (Array.isArray(cleanedData.staff)) {
+                cleanedData.staff = cleanedData.staff.map((s, idx) => ({
+                  ...s,
+                  name: targetNames[idx] || s.name,
+                }));
+                // If fewer than 6, add missing
+                for (let i = cleanedData.staff.length; i < targetNames.length; i++) {
+                  cleanedData.staff.push({
+                    id: `staff_kimyatta_${i + 1}`,
+                    name: targetNames[i],
+                  });
+                }
+              }
+              const kimyattaMember = cleanedData.staff.find(s => s.name.toLowerCase() === 'kimyatta') || cleanedData.staff[0];
+              if (kimyattaMember) {
+                cleanedData.teamLeadId = kimyattaMember.id;
+              }
+            }
+
+            // Always arrange staff members in alphabetical order
+            if (Array.isArray(cleanedData.staff)) {
+              cleanedData.staff = cleanedData.staff.slice().sort((a, b) => 
+                a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+              );
+            }
+
             skipNextCloudSave.current = true;
-            setAppData(syncRollingWeeksAndAllocations(remoteData));
+            setAppData(syncRollingWeeksAndAllocations(cleanedData));
           }
         } else {
           // Document does not exist yet; seed it with current team default data
@@ -161,7 +241,9 @@ export default function App() {
 
     if (!isInitialLoad) {
       setCloudStatus('syncing');
-      const docId = currentTeamId === 'theglobal5' ? 'theglobal5_state' : `team_${currentTeamId}`;
+      const docId = (currentTeamId === 'theglobal5' || currentTeamId === 'team_mazzy') 
+        ? 'theglobal5_state' 
+        : (currentTeamId === 'team_marcus' || currentTeamId === 'team_kimyatta' ? 'team_team_kimyatta' : `team_${currentTeamId}`);
       const docRef = doc(db, FIRESTORE_COLLECTION, docId);
       const timer = setTimeout(() => {
         setDoc(docRef, appData, { merge: true })
@@ -244,9 +326,14 @@ export default function App() {
     return appData.staff.find(s => s.id === appData.teamLeadId) || appData.staff[0];
   }, [appData.staff, appData.teamLeadId]);
 
-  // Staff calculations
+  // Guaranteed alphabetically sorted staff array for consistent presentation
+  const sortedStaff = useMemo(() => {
+    return [...appData.staff].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  }, [appData.staff]);
+
+  // Staff calculations (always in alphabetical order)
   const staffLoadStats = useMemo(() => {
-    return appData.staff.map(staff => {
+    return sortedStaff.map(staff => {
       let sumTotal = 0;
       const weekLoads: Record<string, { total: number; hasChanged: boolean; items: AllocationItem[] }> = {};
 
@@ -266,7 +353,7 @@ export default function App() {
         avg,
       };
     });
-  }, [appData.staff, appData.allocations, active2Weeks]);
+  }, [sortedStaff, appData.allocations, active2Weeks]);
 
   // Overall KPIs
   const kpis = useMemo(() => {
@@ -329,7 +416,7 @@ export default function App() {
     const labels = active2Weeks.map(w => w.label);
     const palette = ['#2563eb', '#10b981', '#6366f1', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4'];
 
-    const datasets = appData.staff.map((s, idx) => {
+    const datasets = sortedStaff.map((s, idx) => {
       const color = palette[idx % palette.length];
       return {
         label: s.name,
@@ -636,7 +723,7 @@ export default function App() {
     
     // Header
     const weekHeaders = active2Weeks.map(w => `"${w.label} Total %"`).join(',');
-    csvContent += `"Team Member","Role",${weekHeaders},"2-Week Avg %","Notes","Detailed Allocations"\n`;
+    csvContent += `"FFIDs","Role",${weekHeaders},"2-Week Avg %","Notes","Detailed Allocations"\n`;
 
     // Rows
     staffLoadStats.forEach(stat => {
@@ -712,7 +799,7 @@ export default function App() {
 
     setAppData(prev => ({
       ...prev,
-      staff: [...prev.staff, newStaff],
+      staff: [...prev.staff, newStaff].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
       allocations: {
         ...prev.allocations,
         ...initialAllocations,
@@ -728,7 +815,9 @@ export default function App() {
     const trimmedName = updatedName.trim();
     
     setAppData(prev => {
-      const updatedStaff = prev.staff.map(s => s.id === id ? { ...s, name: trimmedName } : s);
+      const updatedStaff = prev.staff
+        .map(s => s.id === id ? { ...s, name: trimmedName } : s)
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
       
       // If this member is the team lead, also update the teams_registry leadName
       if (prev.teamLeadId === id) {
@@ -757,7 +846,9 @@ export default function App() {
       return;
     }
     setAppData(prev => {
-      const nextStaff = prev.staff.filter(s => s.id !== id);
+      const nextStaff = prev.staff
+        .filter(s => s.id !== id)
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
       const nextLead = prev.teamLeadId === id ? (nextStaff[0]?.id || '') : prev.teamLeadId;
       const nextLeadMember = nextStaff.find(s => s.id === nextLead);
       if (nextLeadMember) {
@@ -944,13 +1035,13 @@ export default function App() {
                 onUpdateTeam={handleUpdateTeam}
                 onDeleteTeam={handleDeleteTeam}
                 activeTeamTitle={appData.teamTitle}
-                activeLeadName={leadMember?.name || 'Amy'}
+                activeLeadName={leadMember?.name || 'Mazzy'}
               />
             </div>
             <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 font-medium">
-              <span>(TL): <span id="leadNameDisplay" className="text-blue-600 font-semibold">{leadMember?.name || 'Amy'}</span></span>
+              <span>(TL): <span id="leadNameDisplay" className="text-blue-600 font-semibold">{leadMember?.name || 'Mazzy'}</span></span>
               <span>•</span>
-              <span className="text-slate-400">{appData.staff.length} Members</span>
+              <span className="text-slate-400">{appData.staff.length} FFIDs</span>
               <span>•</span>
               {cloudStatus === 'connected' && (
                 <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md text-[11px] font-semibold">
@@ -986,8 +1077,11 @@ export default function App() {
               nextFriday.setDate(nextMonday.getDate() + 4);
               
               const formatLabel = (d1: Date, d2: Date) => {
-                const m1 = d1.toLocaleString('default', { month: 'long' });
-                const m2 = d2.toLocaleString('default', { month: 'long' });
+                const m1 = d1.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+                const m2 = d2.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+                if (m1 === m2) {
+                  return `${m1} ${d1.getDate()} - ${m1} ${d2.getDate()}`;
+                }
                 return `${m1} ${d1.getDate()} - ${m2} ${d2.getDate()}`;
               };
 
@@ -1033,7 +1127,7 @@ export default function App() {
           <div id="cardActiveTeam" className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col justify-between shadow-xs hover:shadow-sm transition-shadow">
             <div>
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Active Team</p>
-              <p id="kpiTeamCount" className="text-3xl font-bold text-slate-900">{kpis.totalStaff} Members</p>
+              <p id="kpiTeamCount" className="text-3xl font-bold text-slate-900">{kpis.totalStaff} FFIDs</p>
             </div>
             <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden mt-4">
               <div className="h-full w-full bg-blue-600 rounded-full"></div>
@@ -1124,7 +1218,7 @@ export default function App() {
               <table className="w-full text-sm border-collapse min-w-[580px]">
                 <thead className="bg-slate-50 text-slate-500 text-[11px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="py-3 px-6 text-left border-b border-slate-200">Team Member</th>
+                    <th className="py-3 px-6 text-left border-b border-slate-200">FFIDs</th>
                     {active2Weeks.map((w, idx) => (
                       <th key={w.id} className="py-3 px-6 text-left border-b border-slate-200">
                         <div className="flex items-center gap-1.5 flex-wrap">
@@ -1792,10 +1886,10 @@ export default function App() {
               {/* Members List */}
               <div className="space-y-2">
                 <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Current Team Members ({appData.staff.length})
+                  Current FFIDs ({appData.staff.length})
                 </h4>
                 <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
-                  {appData.staff.map(s => {
+                  {sortedStaff.map(s => {
                     const isLead = s.id === appData.teamLeadId;
                     const isEditingThisMember = editingStaffId === s.id;
 

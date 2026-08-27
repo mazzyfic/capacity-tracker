@@ -17,8 +17,8 @@ export function formatDateIso(d: Date): string {
 }
 
 export function formatWeekLabel(startDate: Date, endDate: Date): string {
-  const startMonth = startDate.toLocaleString('en-US', { month: 'long' });
-  const endMonth = endDate.toLocaleString('en-US', { month: 'long' });
+  const startMonth = startDate.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+  const endMonth = endDate.toLocaleString('en-US', { month: 'short' }).toUpperCase();
   const startDay = startDate.getDate();
   const endDay = endDate.getDate();
 
@@ -177,6 +177,7 @@ export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate: Date
 
   return {
     ...prevData,
+    staff: (prevData.staff || []).slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
     weeks: rollingWeeks,
     allocations: updatedAllocations,
   };

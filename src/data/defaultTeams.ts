@@ -8,9 +8,9 @@ export interface TeamSummary {
 }
 
 export const DEFAULT_TEAMS_LIST: TeamSummary[] = [
-  { id: 'theglobal5', name: 'TheGlobal5', leadName: 'Amy' },
+  { id: 'theglobal5', name: 'Team Mazzy', leadName: 'Mazzy' },
   { id: 'team_lindsay', name: 'Team Lindsay', leadName: 'Lindsay' },
-  { id: 'team_marcus', name: 'Team Marcus', leadName: 'Marcus' },
+  { id: 'team_kimyatta', name: 'Team Kimyatta', leadName: 'Kimyatta' },
 ];
 
 export const getDefaultTeamData = (teamId: string): AppData => {
@@ -19,15 +19,15 @@ export const getDefaultTeamData = (teamId: string): AppData => {
 
   if (teamId === 'team_lindsay') {
     return {
-      teamTitle: 'Team Lindsay Capacity Tracker',
+      teamTitle: 'Team Lindsay',
       teamLeadId: 'staff_lindsay_1',
       staff: [
+        { id: 'staff_lindsay_6', name: 'Ben' },
+        { id: 'staff_lindsay_5', name: 'Laura' },
         { id: 'staff_lindsay_1', name: 'Lindsay' },
         { id: 'staff_lindsay_2', name: 'Mary' },
-        { id: 'staff_lindsay_3', name: 'Thomas' },
         { id: 'staff_lindsay_4', name: 'Sherien' },
-        { id: 'staff_lindsay_5', name: 'Laura' },
-        { id: 'staff_lindsay_6', name: 'Ben' },
+        { id: 'staff_lindsay_3', name: 'Thomas' },
       ],
       weeks: initialWeeks,
       allocations: {
@@ -103,76 +103,76 @@ export const getDefaultTeamData = (teamId: string): AppData => {
     };
   }
 
-  if (teamId === 'team_marcus') {
+  if (teamId === 'team_kimyatta' || teamId === 'team_marcus') {
     return {
-      teamTitle: 'Team Marcus Capacity Tracker',
-      teamLeadId: 'staff_marcus_1',
+      teamTitle: 'Team Kimyatta',
+      teamLeadId: 'staff_kimyatta_1',
       staff: [
-        { id: 'staff_marcus_1', name: 'Marcus' },
-        { id: 'staff_marcus_2', name: 'David' },
-        { id: 'staff_marcus_3', name: 'Elena' },
-        { id: 'staff_marcus_4', name: 'Jason' },
-        { id: 'staff_marcus_5', name: 'Chloe' },
-        { id: 'staff_marcus_6', name: 'Sam' },
+        { id: 'staff_kimyatta_2', name: 'Anna' },
+        { id: 'staff_kimyatta_3', name: 'Belle' },
+        { id: 'staff_kimyatta_4', name: 'Caroline' },
+        { id: 'staff_kimyatta_5', name: 'Jenna' },
+        { id: 'staff_kimyatta_6', name: 'Kelley' },
+        { id: 'staff_kimyatta_1', name: 'Kimyatta' },
       ],
       weeks: initialWeeks,
       allocations: {
-        [`staff_marcus_1_${w1.id}`]: [
+        [`staff_kimyatta_1_${w1.id}`]: [
           { project: 'Operations Lead & Planning', percent: 35, changed: false, endDateType: 'ongoing' },
           { project: 'Global Cohort Schedule Rollout', percent: 45, changed: false, endDateType: 'date', endDate: '2026-09-28' },
           { project: 'Resource Balancing', percent: 20, changed: false, endDateType: 'secondary_tasks' },
         ],
-        [`staff_marcus_1_${w2.id}`]: [
+        [`staff_kimyatta_1_${w2.id}`]: [
           { project: 'Operations Lead & Planning', percent: 35, changed: false, endDateType: 'ongoing' },
           { project: 'Global Cohort Schedule Rollout', percent: 45, changed: false, endDateType: 'date', endDate: '2026-09-28' },
           { project: 'Resource Balancing', percent: 20, changed: false, endDateType: 'secondary_tasks' },
         ],
-        [`staff_marcus_2_${w1.id}`]: [
+        [`staff_kimyatta_2_${w1.id}`]: [
           { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
           { project: 'Academic Integrity Automation', percent: 65, changed: false, endDateType: 'date', endDate: '2026-10-02' },
           { project: 'Data Pipeline Support', percent: 20, changed: false, endDateType: 'secondary_tasks' },
         ],
-        [`staff_marcus_2_${w2.id}`]: [
+        [`staff_kimyatta_2_${w2.id}`]: [
           { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
           { project: 'Academic Integrity Automation', percent: 65, changed: false, endDateType: 'date', endDate: '2026-10-02' },
           { project: 'Data Pipeline Support', percent: 20, changed: false, endDateType: 'secondary_tasks' },
         ],
-        [`staff_marcus_3_${w1.id}`]: [
+        [`staff_kimyatta_3_${w1.id}`]: [
           { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
           { project: 'Student Success Portal UI', percent: 60, changed: false, endDateType: 'date', endDate: '2026-09-24' },
           { project: 'User Interviews & Feedback', percent: 25, changed: false, endDateType: 'ongoing' },
         ],
-        [`staff_marcus_3_${w2.id}`]: [
+        [`staff_kimyatta_3_${w2.id}`]: [
           { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
           { project: 'Student Success Portal UI', percent: 60, changed: false, endDateType: 'date', endDate: '2026-09-24' },
           { project: 'User Interviews & Feedback', percent: 25, changed: false, endDateType: 'ongoing' },
         ],
-        [`staff_marcus_4_${w1.id}`]: [
+        [`staff_kimyatta_4_${w1.id}`]: [
           { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
           { project: 'Partner University Data Sync', percent: 55, changed: false, endDateType: 'date', endDate: '2026-09-18' },
           { project: 'API Gateway Maintenance', percent: 30, changed: false, endDateType: 'ongoing' },
         ],
-        [`staff_marcus_4_${w2.id}`]: [
+        [`staff_kimyatta_4_${w2.id}`]: [
           { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
           { project: 'Partner University Data Sync', percent: 55, changed: false, endDateType: 'date', endDate: '2026-09-18' },
           { project: 'API Gateway Maintenance', percent: 30, changed: false, endDateType: 'ongoing' },
         ],
-        [`staff_marcus_5_${w1.id}`]: [
+        [`staff_kimyatta_5_${w1.id}`]: [
           { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
           { project: 'Live Webinar Streaming Infrastructure', percent: 50, changed: false, endDateType: 'date', endDate: '2026-10-15' },
           { project: 'Technical Host Support', percent: 35, changed: false, endDateType: 'ongoing' },
         ],
-        [`staff_marcus_5_${w2.id}`]: [
+        [`staff_kimyatta_5_${w2.id}`]: [
           { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
           { project: 'Live Webinar Streaming Infrastructure', percent: 50, changed: false, endDateType: 'date', endDate: '2026-10-15' },
           { project: 'Technical Host Support', percent: 35, changed: false, endDateType: 'ongoing' },
         ],
-        [`staff_marcus_6_${w1.id}`]: [
+        [`staff_kimyatta_6_${w1.id}`]: [
           { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
           { project: 'Cohort Analytics Dashboard', percent: 70, changed: false, endDateType: 'date', endDate: '2026-09-30' },
           { project: 'Weekly Metric Reporting', percent: 15, changed: false, endDateType: 'secondary_tasks' },
         ],
-        [`staff_marcus_6_${w2.id}`]: [
+        [`staff_kimyatta_6_${w2.id}`]: [
           { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
           { project: 'Cohort Analytics Dashboard', percent: 70, changed: false, endDateType: 'date', endDate: '2026-09-30' },
           { project: 'Weekly Metric Reporting', percent: 15, changed: false, endDateType: 'secondary_tasks' },
@@ -181,10 +181,10 @@ export const getDefaultTeamData = (teamId: string): AppData => {
     };
   }
 
-  // Default: theglobal5
+  // Default: Team Mazzy (theglobal5 / team_mazzy)
   return {
-    teamTitle: 'TheGlobal5 Capacity Tracker',
-    teamLeadId: 'staff_1',
+    teamTitle: 'Team Mazzy',
+    teamLeadId: 'staff_3',
     staff: [
       { id: 'staff_1', name: 'Amy' },
       { id: 'staff_2', name: 'Gai' },
@@ -195,6 +195,16 @@ export const getDefaultTeamData = (teamId: string): AppData => {
     ],
     weeks: initialWeeks,
     allocations: {
+      [`staff_3_${w1.id}`]: [
+        { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
+        { project: 'API v2 Integrations', percent: 85, changed: false, endDateType: 'date', endDate: '2026-09-15' },
+        { project: 'Client SDK Support', percent: 10, changed: false, endDateType: 'secondary_tasks' },
+      ],
+      [`staff_3_${w2.id}`]: [
+        { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
+        { project: 'API v2 Integrations', percent: 85, changed: true, endDateType: 'date', endDate: '2026-09-15' },
+        { project: 'Client SDK Support', percent: 10, changed: false, endDateType: 'secondary_tasks' },
+      ],
       [`staff_1_${w1.id}`]: [
         { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
         { project: 'Triage', percent: 10, changed: false, endDateType: 'ongoing' },
@@ -220,16 +230,6 @@ export const getDefaultTeamData = (teamId: string): AppData => {
         { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
         { project: 'LMS Migration Architecture', percent: 65, changed: false, endDateType: 'date', endDate: '2026-09-30' },
         { project: 'Sprint Review & QA', percent: 20, changed: false, endDateType: 'ongoing' },
-      ],
-      [`staff_3_${w1.id}`]: [
-        { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
-        { project: 'API v2 Integrations', percent: 85, changed: false, endDateType: 'date', endDate: '2026-09-15' },
-        { project: 'Client SDK Support', percent: 10, changed: false, endDateType: 'secondary_tasks' },
-      ],
-      [`staff_3_${w2.id}`]: [
-        { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
-        { project: 'API v2 Integrations', percent: 85, changed: true, endDateType: 'date', endDate: '2026-09-15' },
-        { project: 'Client SDK Support', percent: 10, changed: false, endDateType: 'secondary_tasks' },
       ],
       [`staff_4_${w1.id}`]: [
         { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },

@@ -1,0 +1,58 @@
+{
+  "entities": {
+    "TeamDocument": {
+      "title": "TeamDocument",
+      "description": "Capacity tracker document for a specific team including staff, rolling weeks, allocations, and notes.",
+      "type": "object",
+      "properties": {
+        "teamTitle": {
+          "type": "string",
+          "description": "Title of the team tracker"
+        },
+        "teamLeadId": {
+          "type": "string",
+          "description": "Staff ID of the team lead"
+        },
+        "staff": {
+          "type": "array",
+          "description": "List of staff members on the team"
+        },
+        "weeks": {
+          "type": "array",
+          "description": "Active rolling weeks"
+        },
+        "allocations": {
+          "type": "object",
+          "description": "Map of staff_weekId keys to allocation items"
+        },
+        "notes": {
+          "type": "object",
+          "description": "Map of staff member IDs to text notes"
+        }
+      },
+      "required": ["teamTitle", "teamLeadId", "staff", "weeks", "allocations"]
+    },
+    "TeamsRegistry": {
+      "title": "TeamsRegistry",
+      "description": "Registry list of all available teams and leads in the organization.",
+      "type": "object",
+      "properties": {
+        "teams": {
+          "type": "array",
+          "description": "Array of team summaries"
+        }
+      },
+      "required": ["teams"]
+    }
+  },
+  "firestore": {
+    "/capacity_tracker/teams_registry": {
+      "schema": "TeamsRegistry",
+      "description": "Registry of team workspaces"
+    },
+    "/capacity_tracker/{teamDocId}": {
+      "schema": "TeamDocument",
+      "description": "Team capacity state document"
+    }
+  }
+}

@@ -2,6 +2,7 @@ export interface StaffMember {
   id: string;
   name: string;
   role?: string;
+  notes?: string;
 }
 
 export interface WeekHorizon {
@@ -28,6 +29,7 @@ export interface AppData {
   staff: StaffMember[];
   weeks: WeekHorizon[];
   allocations: Record<string, AllocationItem[]>;
+  notes?: Record<string, string>;
 }
 
 export interface TeamSummary {

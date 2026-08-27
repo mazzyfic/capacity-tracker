@@ -20,7 +20,8 @@ import {
   Cloud,
   CloudCheck,
   CloudOff,
-  RefreshCw
+  RefreshCw,
+  MessageSquare
 } from 'lucide-react';
 import { StaffMember, WeekHorizon, AllocationItem, AppData, TeamSummary } from './types';
 import { getRolling2Weeks, syncRollingWeeksAndAllocations, filterActiveAllocations } from './utils/dateUtils';
@@ -616,17 +617,31 @@ export default function App() {
     handleCloseAllocationModal();
   };
 
+  // Staff Notes Update Handler
+  const handleUpdateStaffNotes = (staffId: string, noteText: string) => {
+    setAppData(prev => {
+      const updatedNotes = { ...(prev.notes || {}), [staffId]: noteText };
+      const updatedStaff = prev.staff.map(s => s.id === staffId ? { ...s, notes: noteText } : s);
+      return {
+        ...prev,
+        notes: updatedNotes,
+        staff: updatedStaff,
+      };
+    });
+  };
+
   // CSV Export
   const exportToCSV = () => {
     let csvContent = 'data:text/csv;charset=utf-8,';
     
     // Header
     const weekHeaders = active2Weeks.map(w => `"${w.label} Total %"`).join(',');
-    csvContent += `"Team Member","Role",${weekHeaders},"2-Week Avg %","Detailed Allocations"\n`;
+    csvContent += `"Team Member","Role",${weekHeaders},"2-Week Avg %","Notes","Detailed Allocations"\n`;
 
     // Rows
     staffLoadStats.forEach(stat => {
       const weekTotals = active2Weeks.map(w => stat.weekLoads[w.id]?.total || 0).join(',');
+      const memberNote = (appData.notes?.[stat.staff.id] || stat.staff.notes || '').replace(/"/g, '""');
       const breakdown = active2Weeks.map(w => {
         const items = stat.weekLoads[w.id]?.items || [];
         const details = items.map(i => {
@@ -639,7 +654,7 @@ export default function App() {
         return `[${w.label}: ${details || 'None'}]`;
       }).join(' | ');
 
-      csvContent += `"${stat.staff.name}","${stat.staff.id === appData.teamLeadId ? '(TL)' : 'Member'}",${weekTotals},"${stat.avg}%","${breakdown.replace(/"/g, '""')}"\n`;
+      csvContent += `"${stat.staff.name}","${stat.staff.id === appData.teamLeadId ? '(TL)' : 'Member'}",${weekTotals},"${stat.avg}%","${memberNote}","${breakdown.replace(/"/g, '""')}"\n`;
     });
 
     const encodedUri = encodeURI(csvContent);
@@ -1121,135 +1136,159 @@ export default function App() {
                       </th>
                     ))}
                     <th className="py-3 px-6 text-left border-b border-slate-200 bg-slate-100/50">2-Wk Avg</th>
+                    <th className="py-3 px-6 text-left border-b border-slate-200 min-w-[240px]">
+                      <div className="flex items-center gap-1.5">
+                        <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Notes</span>
+                      </div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody id="gridTbody" className="divide-y divide-slate-100">
                   {filteredStaffStats.length === 0 ? (
                     <tr>
-                      <td colSpan={2 + active2Weeks.length} className="py-8 text-center text-slate-400 font-medium text-xs">
+                      <td colSpan={3 + active2Weeks.length} className="py-8 text-center text-slate-400 font-medium text-xs">
                         No team members match this capacity filter.
                       </td>
                     </tr>
                   ) : (
-                    filteredStaffStats.map(({ staff, weekLoads, avg }) => (
-                      <tr key={staff.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="py-4 px-6 font-semibold text-slate-700">
-                          <div className="flex items-center gap-2">
-                            <span 
-                              onClick={() => {
-                                if (active2Weeks[0]) {
-                                  handleOpenAllocationModal(staff.id, active2Weeks[0].id);
-                                }
-                              }}
-                              className="cursor-pointer hover:text-blue-600 transition-colors font-bold text-slate-800"
-                              title="Click to view/edit workload"
-                            >
-                              {staff.name}
-                            </span>
-                            {staff.id === appData.teamLeadId && (
-                              <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded text-[10px] font-bold">
-                                (TL)
+                    filteredStaffStats.map(({ staff, weekLoads, avg }) => {
+                      const currentNote = appData.notes?.[staff.id] ?? staff.notes ?? '';
+
+                      return (
+                        <tr key={staff.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-4 px-6 font-semibold text-slate-700">
+                            <div className="flex items-center gap-2">
+                              <span 
+                                onClick={() => {
+                                  if (active2Weeks[0]) {
+                                    handleOpenAllocationModal(staff.id, active2Weeks[0].id);
+                                  }
+                                }}
+                                className="cursor-pointer hover:text-blue-600 transition-colors font-bold text-slate-800"
+                                title="Click to view/edit workload"
+                              >
+                                {staff.name}
                               </span>
-                            )}
-                          </div>
-                        </td>
+                              {staff.id === appData.teamLeadId && (
+                                <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded text-[10px] font-bold">
+                                  (TL)
+                                </span>
+                              )}
+                            </div>
+                          </td>
 
-                        {active2Weeks.map(w => {
-                          const weekData = weekLoads[w.id] || { total: 0, hasChanged: false, items: [] };
-                          const sum = weekData.total;
-                          const isOver = sum > 100;
-                          const isTarget = sum >= 80 && sum <= 100;
-                          const changedItems = (weekData.items || []).filter(p => p.changed);
-                          const changedTooltip = changedItems.length > 0
-                            ? `Changed projects:\n${changedItems.map(p => `• ${p.project}: ${p.percent}%`).join('\n')}`
-                            : 'Recently changed';
+                          {active2Weeks.map(w => {
+                            const weekData = weekLoads[w.id] || { total: 0, hasChanged: false, items: [] };
+                            const sum = weekData.total;
+                            const isOver = sum > 100;
+                            const isTarget = sum >= 80 && sum <= 100;
+                            const changedItems = (weekData.items || []).filter(p => p.changed);
+                            const changedTooltip = changedItems.length > 0
+                              ? `Changed projects:\n${changedItems.map(p => `• ${p.project}: ${p.percent}%`).join('\n')}`
+                              : 'Recently changed';
 
-                          let pillStyle = 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:border-blue-300';
-                          if (isOver) {
-                            pillStyle = 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 hover:border-rose-300';
-                          } else if (isTarget) {
-                            pillStyle = 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300';
-                          }
+                            let pillStyle = 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:border-blue-300';
+                            if (isOver) {
+                              pillStyle = 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 hover:border-rose-300';
+                            } else if (isTarget) {
+                              pillStyle = 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300';
+                            }
 
-                          return (
-                            <td
-                              key={w.id}
-                              className="py-4 px-6 text-left"
-                            >
-                              <div className="flex items-center justify-start gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleOpenAllocationModal(staff.id, w.id);
-                                  }}
-                                  className={`px-3 py-1 border rounded-full font-bold text-xs transition-all transform hover:scale-105 cursor-pointer shadow-2xs ${pillStyle}`}
-                                  title={`Click to edit workload for ${staff.name} (${w.label})`}
-                                >
-                                  {sum}%
-                                </button>
-                                {weekData.hasChanged && (
-                                  <div className="relative group/zap inline-flex items-center">
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleOpenAllocationModal(staff.id, w.id);
-                                      }}
-                                      className="p-1 rounded-md hover:bg-amber-100/80 transition-colors cursor-pointer"
-                                      title={changedTooltip}
-                                    >
-                                      <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
-                                    </button>
-                                    {/* Rich Tooltip Popover */}
-                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover/zap:flex flex-col z-50 bg-slate-900 text-white text-[11px] py-2 px-3 rounded-xl shadow-xl pointer-events-none border border-slate-700 min-w-[190px] text-left">
-                                      <div className="flex items-center gap-1.5 text-amber-400 font-bold border-b border-slate-700 pb-1 mb-1">
-                                        <Zap className="w-3 h-3 fill-amber-400 shrink-0" />
-                                        <span>Changed Projects</span>
-                                      </div>
-                                      <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                                        {changedItems.map((cp, idx) => {
-                                          let endBadge = '';
-                                          if (cp.endDateType === 'ongoing') endBadge = 'Ongoing';
-                                          else if (cp.endDateType === 'secondary_tasks') endBadge = 'Secondary Tasks';
-                                          else if (cp.endDate) endBadge = cp.endDate;
+                            return (
+                              <td
+                                key={w.id}
+                                className="py-4 px-6 text-left"
+                              >
+                                <div className="flex items-center justify-start gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenAllocationModal(staff.id, w.id);
+                                    }}
+                                    className={`px-3 py-1 border rounded-full font-bold text-xs transition-all transform hover:scale-105 cursor-pointer shadow-2xs ${pillStyle}`}
+                                    title={`Click to edit workload for ${staff.name} (${w.label})`}
+                                  >
+                                    {sum}%
+                                  </button>
+                                  {weekData.hasChanged && (
+                                    <div className="relative group/zap inline-flex items-center">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleOpenAllocationModal(staff.id, w.id);
+                                        }}
+                                        className="p-1 rounded-md hover:bg-amber-100/80 transition-colors cursor-pointer"
+                                        title={changedTooltip}
+                                      >
+                                        <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                                      </button>
+                                      {/* Rich Tooltip Popover */}
+                                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover/zap:flex flex-col z-50 bg-slate-900 text-white text-[11px] py-2 px-3 rounded-xl shadow-xl pointer-events-none border border-slate-700 min-w-[190px] text-left">
+                                        <div className="flex items-center gap-1.5 text-amber-400 font-bold border-b border-slate-700 pb-1 mb-1">
+                                          <Zap className="w-3 h-3 fill-amber-400 shrink-0" />
+                                          <span>Changed Projects</span>
+                                        </div>
+                                        <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                          {changedItems.map((cp, idx) => {
+                                            let endBadge = '';
+                                            if (cp.endDateType === 'ongoing') endBadge = 'Ongoing';
+                                            else if (cp.endDateType === 'secondary_tasks') endBadge = 'Secondary Tasks';
+                                            else if (cp.endDate) endBadge = cp.endDate;
 
-                                          return (
-                                            <div key={idx} className="flex items-center justify-between gap-2 text-slate-200">
-                                              <div className="flex flex-col truncate max-w-[140px]">
-                                                <span className="truncate font-medium">{cp.project}</span>
-                                                {endBadge && (
-                                                  <span className="text-[9px] text-amber-300/80 font-normal">
-                                                    {cp.endDateType === 'date' || !cp.endDateType ? `End: ${endBadge}` : endBadge}
-                                                  </span>
-                                                )}
+                                            return (
+                                              <div key={idx} className="flex items-center justify-between gap-2 text-slate-200">
+                                                <div className="flex flex-col truncate max-w-[140px]">
+                                                  <span className="truncate font-medium">{cp.project}</span>
+                                                  {endBadge && (
+                                                    <span className="text-[9px] text-amber-300/80 font-normal">
+                                                      {cp.endDateType === 'date' || !cp.endDateType ? `End: ${endBadge}` : endBadge}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                                <span className="font-bold text-amber-300 shrink-0">{cp.percent}%</span>
                                               </div>
-                                              <span className="font-bold text-amber-300 shrink-0">{cp.percent}%</span>
-                                            </div>
-                                          );
-                                        })}
+                                            );
+                                          })}
+                                        </div>
                                       </div>
                                     </div>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          );
-                        })}
+                                  )}
+                                </div>
+                              </td>
+                            );
+                          })}
 
-                        <td
-                          className="py-4 px-6 text-left font-bold text-slate-900 bg-slate-100/30 cursor-pointer hover:bg-blue-50/40 transition-colors"
-                          onClick={() => {
-                            if (active2Weeks[0]) {
-                              handleOpenAllocationModal(staff.id, active2Weeks[0].id);
-                            }
-                          }}
-                          title="Click to view primary week allocations"
-                        >
-                          <span className={`${avg > 100 ? 'text-rose-600 font-extrabold' : 'text-slate-800 font-bold'}`}>{avg}%</span>
-                        </td>
-                      </tr>
-                    ))
+                          <td
+                            className="py-4 px-6 text-left font-bold text-slate-900 bg-slate-100/30 cursor-pointer hover:bg-blue-50/40 transition-colors"
+                            onClick={() => {
+                              if (active2Weeks[0]) {
+                                handleOpenAllocationModal(staff.id, active2Weeks[0].id);
+                              }
+                            }}
+                            title="Click to view primary week allocations"
+                          >
+                            <span className={`${avg > 100 ? 'text-rose-600 font-extrabold' : 'text-slate-800 font-bold'}`}>{avg}%</span>
+                          </td>
+
+                          {/* Notes Column */}
+                          <td className="py-3 px-6 text-left">
+                            <div className="relative group/note flex items-center">
+                              <input
+                                type="text"
+                                value={currentNote}
+                                onChange={(e) => handleUpdateStaffNotes(staff.id, e.target.value)}
+                                placeholder="Add note (e.g. PTO, on-call)..."
+                                className="w-full text-xs text-slate-800 placeholder-slate-400 bg-slate-50/60 hover:bg-slate-100/80 focus:bg-white border border-slate-200/60 hover:border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-lg px-3 py-1.5 transition-all outline-none"
+                                title="Add notes for this team member"
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

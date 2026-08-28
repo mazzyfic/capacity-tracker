@@ -286,10 +286,16 @@ export default function App() {
   const [rightPanelTab, setRightPanelTab] = useState<'heatmap' | 'chart'>('heatmap');
   
   // Workload Allocation Modal State
+  interface ModalAllocationRow extends AllocationItem {
+    isNew?: boolean;
+    initialPercent?: number;
+    initialChanged?: boolean;
+  }
+
   const [allocationModalOpen, setAllocationModalOpen] = useState(false);
   const [modalStaffId, setModalStaffId] = useState<string | null>(null);
   const [modalWeekId, setModalWeekId] = useState<string | null>(null);
-  const [modalRows, setModalRows] = useState<AllocationItem[]>([]);
+  const [modalRows, setModalRows] = useState<ModalAllocationRow[]>([]);
 
   // Title Edit State
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -497,6 +503,9 @@ export default function App() {
     ];
     setModalRows(list.map(item => ({ 
       ...item, 
+      isNew: false,
+      initialPercent: item.percent,
+      initialChanged: item.changed || false,
       endDateType: item.endDateType || 'date',
       endDate: item.endDate || ''
     })));
@@ -513,7 +522,16 @@ export default function App() {
   const handleAddProjectRow = () => {
     setModalRows(prev => [
       ...prev, 
-      { project: '', percent: 0, changed: false, endDateType: 'date', endDate: '' }
+      { 
+        project: '', 
+        percent: 0, 
+        isNew: true,
+        initialPercent: undefined,
+        initialChanged: false,
+        changed: false, 
+        endDateType: 'date', 
+        endDate: '' 
+      }
     ]);
   };
 
@@ -528,20 +546,31 @@ export default function App() {
   ) => {
     setModalRows(prev => {
       const next = [...prev];
+      const row = next[index];
+      if (!row) return prev;
+
       if (field === 'project') {
-        next[index] = { ...next[index], project: String(value) };
+        next[index] = { ...row, project: String(value) };
       } else if (field === 'endDateType') {
         const newType = value as 'date' | 'ongoing' | 'secondary_tasks';
-        next[index] = { ...next[index], endDateType: newType };
+        next[index] = { ...row, endDateType: newType };
       } else if (field === 'endDate') {
-        next[index] = { ...next[index], endDate: String(value) };
+        next[index] = { ...row, endDate: String(value) };
       } else {
         const newPct = Math.max(0, Number(value) || 0);
-        const hasPctChanged = next[index].percent !== newPct;
+        let changed = row.changed;
+        if (!row.isNew) {
+          // Previously added projects: only mark changed if the percent differs from original saved value
+          if (row.initialPercent !== undefined) {
+            changed = newPct !== row.initialPercent ? true : (row.initialChanged || false);
+          } else {
+            changed = newPct !== row.percent ? true : (row.initialChanged || false);
+          }
+        }
         next[index] = { 
-          ...next[index], 
-          percent: newPct,
-          changed: hasPctChanged ? true : next[index].changed 
+          ...row, 
+          percent: newPct, 
+          changed 
         };
       }
       return next;
@@ -576,6 +605,9 @@ export default function App() {
     setModalRows(prevAllocations.map(item => ({ 
       ...item, 
       changed: false,
+      isNew: false,
+      initialPercent: item.percent,
+      initialChanged: false,
       endDateType: item.endDateType || 'date',
       endDate: item.endDate || ''
     })));
@@ -627,7 +659,7 @@ export default function App() {
         [nextKey]: currentValidRows.map(r => ({ 
           project: r.project.trim(), 
           percent: Number(r.percent) || 0, 
-          changed: true,
+          changed: r.changed || false,
           endDateType: r.endDateType || 'date',
           endDate: r.endDate || ''
         })),
@@ -682,7 +714,18 @@ export default function App() {
         const projName = r.project.trim();
         const newPct = Number(r.percent) || 0;
         const existing = oldList.find(p => p.project.toLowerCase() === projName.toLowerCase());
-        const isChanged = r.changed || (existing ? existing.percent !== newPct : true);
+
+        let isChanged = false;
+        if (r.isNew) {
+          // Newly added project row in this modal session: do not mark changed automatically
+          isChanged = r.changed || false;
+        } else if (existing) {
+          // Previously added project: mark changed if percentage was modified or manually marked
+          isChanged = r.changed || (existing.percent !== newPct);
+        } else {
+          isChanged = r.changed || false;
+        }
+
         return { 
           project: projName, 
           percent: newPct, 

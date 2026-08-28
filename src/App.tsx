@@ -21,7 +21,8 @@ import {
   CloudCheck,
   CloudOff,
   RefreshCw,
-  MessageSquare
+  MessageSquare,
+  GripVertical
 } from 'lucide-react';
 import { StaffMember, WeekHorizon, AllocationItem, AppData, TeamSummary } from './types';
 import { getRolling2Weeks, syncRollingWeeksAndAllocations, filterActiveAllocations } from './utils/dateUtils';
@@ -296,6 +297,8 @@ export default function App() {
   const [modalStaffId, setModalStaffId] = useState<string | null>(null);
   const [modalWeekId, setModalWeekId] = useState<string | null>(null);
   const [modalRows, setModalRows] = useState<ModalAllocationRow[]>([]);
+  const [draggedRowIndex, setDraggedRowIndex] = useState<number | null>(null);
+  const [dragOverRowIndex, setDragOverRowIndex] = useState<number | null>(null);
 
   // Title Edit State
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -316,8 +319,12 @@ export default function App() {
   // Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
+  const showToast = (msg: unknown) => {
+    if (typeof msg === 'string') {
+      setToastMessage(msg);
+    } else {
+      setToastMessage('Allocations saved successfully');
+    }
     setTimeout(() => setToastMessage(null), 3000);
   };
 
@@ -585,6 +592,54 @@ export default function App() {
     });
   };
 
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedRowIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', index.toString());
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverRowIndex !== index) {
+      setDragOverRowIndex(index);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedRowIndex(null);
+    setDragOverRowIndex(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    if (draggedRowIndex === null || draggedRowIndex === targetIndex) {
+      setDraggedRowIndex(null);
+      setDragOverRowIndex(null);
+      return;
+    }
+
+    setModalRows(prev => {
+      const next = [...prev];
+      const [movedItem] = next.splice(draggedRowIndex, 1);
+      next.splice(targetIndex, 0, movedItem);
+      return next;
+    });
+
+    setDraggedRowIndex(null);
+    setDragOverRowIndex(null);
+  };
+
+  const handleMoveRow = (fromIndex: number, toIndex: number) => {
+    if (toIndex < 0 || toIndex >= modalRows.length) return;
+    setModalRows(prev => {
+      const next = [...prev];
+      const [movedItem] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, movedItem);
+      return next;
+    });
+  };
+
   // Copy helper 1: Copy From Prev Week
   const handleCopyFromPrevWeek = () => {
     if (!modalStaffId || !modalWeekId) return;
@@ -703,7 +758,7 @@ export default function App() {
     return modalRows.reduce((acc, row) => acc + (Number(row.percent) || 0), 0);
   }, [modalRows]);
 
-  const handleSaveAllocations = () => {
+  const handleSaveAllocations = (customToastMsg?: string | React.MouseEvent | React.SyntheticEvent) => {
     if (!modalStaffId || !modalWeekId) return;
     const key = `${modalStaffId}_${modalWeekId}`;
     const oldList = appData.allocations[key] || [];
@@ -743,7 +798,8 @@ export default function App() {
       },
     }));
 
-    showToast('Allocations saved successfully');
+    const message = typeof customToastMsg === 'string' ? customToastMsg : 'Allocations saved successfully';
+    showToast(message);
     handleCloseAllocationModal();
   };
 
@@ -1541,7 +1597,7 @@ export default function App() {
           id="allocationModal" 
           className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4"
           onClick={(e) => {
-            if (e.target === e.currentTarget) handleCloseAllocationModal();
+            if (e.target === e.currentTarget) handleSaveAllocations('Allocations auto-saved');
           }}
         >
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
@@ -1563,9 +1619,9 @@ export default function App() {
               <button
                 id="closeAllocationModalBtn"
                 type="button"
-                onClick={handleCloseAllocationModal}
+                onClick={() => handleSaveAllocations('Allocations auto-saved')}
                 className="text-slate-400 hover:text-white cursor-pointer p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
-                title="Close"
+                title="Save & Close"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1598,11 +1654,14 @@ export default function App() {
 
             {/* Table Column Headers */}
             <div className="hidden sm:grid grid-cols-12 gap-3 px-4 py-2.5 mx-5 mt-3 mb-1 bg-slate-100 border border-slate-200 rounded-xl text-xs font-black text-slate-800 tracking-wider uppercase items-center shadow-2xs">
-              <span className="col-span-4 flex items-center gap-1.5">
+              <span className="col-span-5 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
                 PROJECT / TASK CODE
+                <span className="text-[10px] font-normal text-slate-400 normal-case tracking-normal ml-1">
+                  (Drag <GripVertical className="w-3 h-3 inline text-slate-400" /> to reorder)
+                </span>
               </span>
-              <span className="col-span-4 flex items-center gap-1.5">
+              <span className="col-span-3 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-slate-600"></span>
                 PROJECT END DATE
               </span>
@@ -1625,131 +1684,156 @@ export default function App() {
                 {modalRows.length === 0 ? (
                   <p className="text-xs text-slate-400 text-center py-6">No project allocations configured yet.</p>
                 ) : (
-                  modalRows.map((row, idx) => (
-                    <div 
-                      key={idx} 
-                      className={`grid grid-cols-12 gap-3 items-center p-2.5 rounded-xl transition-all ${
-                        row.changed ? 'bg-amber-50/50 border border-amber-200' : 'bg-slate-50/50 border border-slate-200/70 hover:border-slate-300'
-                      }`}
-                    >
-                      {/* Project / Task Code Input */}
-                      <div className="col-span-12 sm:col-span-4 relative flex flex-col justify-center">
-                        <span className="sm:hidden text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1">
-                          Project / Task Code
-                        </span>
-                        <input
-                          type="text"
-                          value={row.project}
-                          onChange={e => handleRowChange(idx, 'project', e.target.value)}
-                          placeholder="Project name (e.g. LMS Migration)"
-                          className={`w-full px-3 py-2 text-sm font-semibold text-slate-800 bg-white border ${
-                            row.changed 
-                              ? 'border-amber-300 focus:border-amber-500 focus:ring-amber-100' 
-                              : 'border-slate-200 hover:border-slate-300 focus:border-blue-500 focus:ring-blue-100'
-                          } rounded-xl outline-none focus:ring-2 transition-all shadow-2xs`}
-                        />
-                      </div>
+                  modalRows.map((row, idx) => {
+                    const isDraggingThis = draggedRowIndex === idx;
+                    const isDropTarget = dragOverRowIndex === idx && draggedRowIndex !== idx;
 
-                      {/* Project End Date Selector (Option 1: Date Selection, Option 2: Ongoing, Option 3: Secondary Tasks) */}
-                      <div className="col-span-12 sm:col-span-4 flex flex-col sm:flex-row items-start sm:items-center gap-1.5 flex-wrap sm:flex-nowrap">
-                        <span className="sm:hidden text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1">
-                          Project End Date
-                        </span>
-                        <div className="flex items-center gap-1.5 w-full min-w-0">
-                          <select
-                            value={row.endDateType || 'date'}
-                            onChange={e => handleRowChange(idx, 'endDateType', e.target.value)}
-                            className="px-2.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 shadow-2xs shrink-0 cursor-pointer"
-                            title="Project End Date selection"
-                          >
-                            <option value="date">Select Date</option>
-                            <option value="ongoing">Ongoing</option>
-                            <option value="secondary_tasks">Secondary Tasks</option>
-                          </select>
-
-                          {(!row.endDateType || row.endDateType === 'date') && (
-                            <input
-                              type="date"
-                              value={row.endDate || ''}
-                              onChange={e => handleRowChange(idx, 'endDate', e.target.value)}
-                              className="w-full min-w-0 px-2 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 shadow-2xs cursor-pointer"
-                              title="Pick Project End Date"
-                            />
-                          )}
-
-                          {row.endDateType === 'ongoing' && (
-                            <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-lg whitespace-nowrap">
-                              Ongoing
-                            </span>
-                          )}
-
-                          {row.endDateType === 'secondary_tasks' && (
-                            <span className="text-[11px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1.5 rounded-lg whitespace-nowrap">
-                              Secondary Tasks
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Allocation %, Changed tag & Delete */}
-                      <div className="col-span-12 sm:col-span-4 flex items-center justify-between sm:justify-end gap-2 pt-1 sm:pt-0">
-                        <span className="sm:hidden text-[10px] font-extrabold text-slate-700 uppercase tracking-wider">
-                          Allocation % & Status
-                        </span>
-                        <div className="flex items-center justify-end gap-2 shrink-0">
-                          {/* Changed Icon & Tag */}
-                          {row.changed ? (
-                            <button
-                              type="button"
-                              onClick={() => handleToggleRowChanged(idx)}
-                              className="px-2 py-1 bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 rounded-lg text-[11px] font-bold flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs transition-colors whitespace-nowrap"
-                              title="Percentage changed for this project (click to toggle)"
+                    return (
+                      <div 
+                        key={idx} 
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, idx)}
+                        onDragOver={(e) => handleDragOver(e, idx)}
+                        onDragEnd={handleDragEnd}
+                        onDrop={(e) => handleDrop(e, idx)}
+                        className={`grid grid-cols-12 gap-2 sm:gap-3 items-center p-2.5 rounded-xl transition-all ${
+                          isDraggingThis 
+                            ? 'opacity-40 border-2 border-dashed border-blue-400 bg-blue-50/40 shadow-inner' 
+                            : isDropTarget
+                            ? 'border-2 border-blue-500 bg-blue-50/70 ring-2 ring-blue-200 shadow-md translate-y-0.5'
+                            : row.changed 
+                            ? 'bg-amber-50/50 border border-amber-200 hover:border-amber-300' 
+                            : 'bg-slate-50/50 border border-slate-200/70 hover:border-slate-300'
+                        }`}
+                      >
+                        {/* Project / Task Code Input with Drag Handle */}
+                        <div className="col-span-12 sm:col-span-5 relative flex flex-col justify-center">
+                          <span className="sm:hidden text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1 flex items-center justify-between">
+                            <span>Project / Task Code</span>
+                            <span className="text-[10px] font-normal text-slate-400 normal-case">Drag handle to reorder</span>
+                          </span>
+                          <div className="flex items-center gap-1.5 w-full">
+                            <div 
+                              className="cursor-grab active:cursor-grabbing p-1.5 text-slate-400 hover:text-blue-600 hover:bg-slate-200/80 rounded-lg transition-colors shrink-0 select-none flex items-center justify-center"
+                              title="Drag to rearrange project order"
                             >
-                              <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500 shrink-0" />
-                              <span>Changed</span>
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleToggleRowChanged(idx)}
-                              className="px-1.5 py-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 border border-transparent hover:border-amber-200 rounded-lg text-[11px] font-semibold shrink-0 cursor-pointer opacity-70 hover:opacity-100 transition-all flex items-center gap-1"
-                              title="Mark project as changed"
-                            >
-                              <Zap className="w-3.5 h-3.5" />
-                              <span className="hidden lg:inline text-[10px] text-slate-500">Mark</span>
-                            </button>
-                          )}
-
-                          {/* Allocation % Input */}
-                          <div className="relative w-20 flex items-center shrink-0">
+                              <GripVertical className="w-4 h-4" />
+                            </div>
                             <input
-                              type="number"
-                              min="0"
-                              max="200"
-                              value={row.percent === 0 && row.project === '' ? '' : row.percent}
-                              onChange={e => handleRowChange(idx, 'percent', e.target.value)}
-                              className={`w-full pl-2 pr-6 py-2 text-sm font-bold bg-white border ${
+                              type="text"
+                              value={row.project}
+                              onChange={e => handleRowChange(idx, 'project', e.target.value)}
+                              placeholder="Project name (e.g. LMS Migration)"
+                              className={`w-full px-3 py-2 text-sm font-semibold text-slate-800 bg-white border ${
                                 row.changed 
-                                  ? 'border-amber-300 text-amber-900 focus:border-amber-500 focus:ring-amber-100' 
-                                  : 'border-slate-200 text-slate-800 hover:border-slate-300 focus:border-blue-500 focus:ring-blue-100'
-                              } rounded-xl outline-none focus:ring-2 text-right transition-all shadow-2xs`}
+                                  ? 'border-amber-300 focus:border-amber-500 focus:ring-amber-100' 
+                                  : 'border-slate-200 hover:border-slate-300 focus:border-blue-500 focus:ring-blue-100'
+                              } rounded-xl outline-none focus:ring-2 transition-all shadow-2xs`}
                             />
-                            <span className="absolute right-2 text-xs font-bold text-slate-400 pointer-events-none">%</span>
                           </div>
+                        </div>
 
-                          {/* Delete Button */}
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveProjectRow(idx)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors shrink-0"
-                            title="Remove task"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                        {/* Project End Date Selector (Option 1: Date Selection, Option 2: Ongoing, Option 3: Secondary Tasks) */}
+                        <div className="col-span-12 sm:col-span-3 flex flex-col sm:flex-row items-start sm:items-center gap-1.5 flex-wrap sm:flex-nowrap">
+                          <span className="sm:hidden text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1">
+                            Project End Date
+                          </span>
+                          <div className="flex items-center gap-1.5 w-full min-w-0">
+                            <select
+                              value={row.endDateType || 'date'}
+                              onChange={e => handleRowChange(idx, 'endDateType', e.target.value)}
+                              className="px-2.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 shadow-2xs shrink-0 cursor-pointer"
+                              title="Project End Date selection"
+                            >
+                              <option value="date">Date</option>
+                              <option value="ongoing">Ongoing</option>
+                              <option value="secondary_tasks">Secondary</option>
+                            </select>
+
+                            {(!row.endDateType || row.endDateType === 'date') && (
+                              <input
+                                type="date"
+                                value={row.endDate || ''}
+                                onChange={e => handleRowChange(idx, 'endDate', e.target.value)}
+                                className="w-full min-w-0 px-2 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 shadow-2xs cursor-pointer"
+                                title="Pick Project End Date"
+                              />
+                            )}
+
+                            {row.endDateType === 'ongoing' && (
+                              <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1.5 rounded-lg whitespace-nowrap">
+                                Ongoing
+                              </span>
+                            )}
+
+                            {row.endDateType === 'secondary_tasks' && (
+                              <span className="text-[11px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1.5 rounded-lg whitespace-nowrap">
+                                Secondary
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Allocation %, Changed tag & Delete */}
+                        <div className="col-span-12 sm:col-span-4 flex items-center justify-between sm:justify-end gap-2 pt-1 sm:pt-0">
+                          <span className="sm:hidden text-[10px] font-extrabold text-slate-700 uppercase tracking-wider">
+                            Allocation % & Status
+                          </span>
+                          <div className="flex items-center justify-end gap-2 shrink-0">
+                            {/* Changed Icon & Tag */}
+                            {row.changed ? (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleRowChanged(idx)}
+                                className="px-2 py-1 bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 rounded-lg text-[11px] font-bold flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs transition-colors whitespace-nowrap"
+                                title="Percentage changed for this project (click to toggle)"
+                              >
+                                <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500 shrink-0" />
+                                <span>Changed</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleRowChanged(idx)}
+                                className="px-1.5 py-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 border border-transparent hover:border-amber-200 rounded-lg text-[11px] font-semibold shrink-0 cursor-pointer opacity-70 hover:opacity-100 transition-all flex items-center gap-1"
+                                title="Mark project as changed"
+                              >
+                                <Zap className="w-3.5 h-3.5" />
+                                <span className="hidden lg:inline text-[10px] text-slate-500">Mark</span>
+                              </button>
+                            )}
+
+                            {/* Allocation % Input */}
+                            <div className="relative w-20 flex items-center shrink-0">
+                              <input
+                                type="number"
+                                min="0"
+                                max="200"
+                                value={row.percent === 0 && row.project === '' ? '' : row.percent}
+                                onChange={e => handleRowChange(idx, 'percent', e.target.value)}
+                                className={`w-full pl-2 pr-6 py-2 text-sm font-bold bg-white border ${
+                                  row.changed 
+                                    ? 'border-amber-300 text-amber-900 focus:border-amber-500 focus:ring-amber-100' 
+                                    : 'border-slate-200 text-slate-800 hover:border-slate-300 focus:border-blue-500 focus:ring-blue-100'
+                                } rounded-xl outline-none focus:ring-2 text-right transition-all shadow-2xs`}
+                              />
+                              <span className="absolute right-2 text-xs font-bold text-slate-400 pointer-events-none">%</span>
+                            </div>
+
+                            {/* Delete Button */}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveProjectRow(idx)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors shrink-0"
+                              title="Remove task"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
 
@@ -1795,7 +1879,7 @@ export default function App() {
               <button
                 id="saveAllocationsBtn"
                 type="button"
-                onClick={handleSaveAllocations}
+                onClick={() => handleSaveAllocations()}
                 className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer transition-colors"
               >
                 Save Allocations

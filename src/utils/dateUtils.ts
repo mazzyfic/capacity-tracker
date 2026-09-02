@@ -9,6 +9,11 @@ export function getMondayOfWeek(date: Date = new Date()): Date {
   return monday;
 }
 
+export function parseDateIso(isoString: string): Date {
+  const [year, month, day] = isoString.split('-').map(Number);
+  return new Date(year, month - 1, day, 0, 0, 0, 0);
+}
+
 export function formatDateIso(d: Date): string {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');

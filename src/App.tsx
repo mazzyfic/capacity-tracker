@@ -25,7 +25,14 @@ import {
   GripVertical
 } from 'lucide-react';
 import { StaffMember, WeekHorizon, AllocationItem, AppData, TeamSummary } from './types';
-import { getRolling2Weeks, syncRollingWeeksAndAllocations, filterActiveAllocations } from './utils/dateUtils';
+import { 
+  getRolling2Weeks, 
+  syncRollingWeeksAndAllocations, 
+  filterActiveAllocations,
+  parseDateIso,
+  formatDateIso,
+  formatWeekLabel
+} from './utils/dateUtils';
 import { DEFAULT_TEAMS_LIST, getDefaultTeamData } from './data/defaultTeams';
 import { TeamSwitcher } from './components/TeamSwitcher';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
@@ -679,23 +686,19 @@ export default function App() {
 
     if (currentWeekIndex === appData.weeks.length - 1) {
       const lastWeek = appData.weeks[currentWeekIndex];
-      const nextStart = new Date(lastWeek.startDate);
-      nextStart.setDate(nextStart.getDate() + 7);
-      const nextEnd = new Date(lastWeek.endDate);
-      nextEnd.setDate(nextEnd.getDate() + 7);
+      const prevStart = parseDateIso(lastWeek.startDate);
+      const nextStart = new Date(prevStart.getFullYear(), prevStart.getMonth(), prevStart.getDate() + 7);
+      const nextEnd = new Date(nextStart.getFullYear(), nextStart.getMonth(), nextStart.getDate() + 4, 23, 59, 59);
 
-      const formatLabel = (d1: Date, d2: Date) => {
-        const m1 = d1.toLocaleString('default', { month: 'long' });
-        const m2 = d2.toLocaleString('default', { month: 'long' });
-        return `${m1} ${d1.getDate()} - ${m2} ${d2.getDate()}`;
-      };
+      const nextIsoStart = formatDateIso(nextStart);
+      const nextIsoEnd = formatDateIso(nextEnd);
 
-      const newWeekId = `w_${Date.now()}`;
+      const newWeekId = `w_${nextIsoStart}`;
       targetWeek = {
         id: newWeekId,
-        label: formatLabel(nextStart, nextEnd),
-        startDate: nextStart.toISOString().split('T')[0],
-        endDate: nextEnd.toISOString().split('T')[0],
+        label: formatWeekLabel(nextStart, nextEnd),
+        startDate: nextIsoStart,
+        endDate: nextIsoEnd,
         archived: false,
       };
       nextWeeks.push(targetWeek);
@@ -1600,7 +1603,7 @@ export default function App() {
             if (e.target === e.currentTarget) handleSaveAllocations('Allocations auto-saved');
           }}
         >
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
             {/* Modal Header */}
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-3.5">
@@ -1661,11 +1664,11 @@ export default function App() {
                   (Drag <GripVertical className="w-3 h-3 inline text-slate-400" /> to reorder)
                 </span>
               </span>
-              <span className="col-span-3 flex items-center gap-1.5">
+              <span className="col-span-4 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-slate-600"></span>
                 PROJECT END DATE
               </span>
-              <span className="col-span-4 text-right pr-4 flex items-center justify-end gap-1.5">
+              <span className="col-span-3 text-right pr-2 flex items-center justify-end gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
                 ALLOCATION % & STATUS
               </span>
@@ -1734,16 +1737,16 @@ export default function App() {
                         </div>
 
                         {/* Project End Date Selector (Option 1: Date Selection, Option 2: Ongoing, Option 3: Secondary Tasks) */}
-                        <div className="col-span-12 sm:col-span-3 flex flex-col sm:flex-row items-start sm:items-center gap-1.5 flex-wrap sm:flex-nowrap">
+                        <div className="col-span-12 sm:col-span-4 flex flex-col sm:flex-row items-start sm:items-center gap-1.5">
                           <span className="sm:hidden text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1">
                             Project End Date
                           </span>
-                          <div className="flex items-center gap-1.5 w-full min-w-0">
+                          <div className="flex items-center gap-2 w-full min-w-0">
                             <select
                               value={row.endDateType || 'date'}
                               onChange={e => handleRowChange(idx, 'endDateType', e.target.value)}
                               className="px-2.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 shadow-2xs shrink-0 cursor-pointer"
-                              title="Project End Date selection"
+                              title="Project End Date type"
                             >
                               <option value="date">Date</option>
                               <option value="ongoing">Ongoing</option>
@@ -1751,35 +1754,47 @@ export default function App() {
                             </select>
 
                             {(!row.endDateType || row.endDateType === 'date') && (
-                              <input
-                                type="date"
-                                value={row.endDate || ''}
-                                onChange={e => handleRowChange(idx, 'endDate', e.target.value)}
-                                className="w-full min-w-0 px-2 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 shadow-2xs cursor-pointer"
-                                title="Pick Project End Date"
-                              />
+                              <div className="relative flex-1 min-w-[145px]">
+                                <input
+                                  type="date"
+                                  value={row.endDate || ''}
+                                  onChange={e => handleRowChange(idx, 'endDate', e.target.value)}
+                                  onClick={(e) => {
+                                    try {
+                                      (e.currentTarget as any).showPicker?.();
+                                    } catch {}
+                                  }}
+                                  onFocus={(e) => {
+                                    try {
+                                      (e.currentTarget as any).showPicker?.();
+                                    } catch {}
+                                  }}
+                                  className="w-full px-2.5 py-1.5 text-xs font-semibold text-slate-800 bg-white border border-slate-200 hover:border-slate-300 focus:border-blue-500 rounded-xl outline-none focus:ring-2 focus:ring-blue-100 shadow-2xs cursor-pointer tracking-tight"
+                                  title="Click anywhere to open calendar"
+                                />
+                              </div>
                             )}
 
                             {row.endDateType === 'ongoing' && (
-                              <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1.5 rounded-lg whitespace-nowrap">
+                              <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg whitespace-nowrap">
                                 Ongoing
                               </span>
                             )}
 
                             {row.endDateType === 'secondary_tasks' && (
-                              <span className="text-[11px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1.5 rounded-lg whitespace-nowrap">
-                                Secondary
+                              <span className="text-[11px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-lg whitespace-nowrap">
+                                Secondary Tasks
                               </span>
                             )}
                           </div>
                         </div>
 
                         {/* Allocation %, Changed tag & Delete */}
-                        <div className="col-span-12 sm:col-span-4 flex items-center justify-between sm:justify-end gap-2 pt-1 sm:pt-0">
+                        <div className="col-span-12 sm:col-span-3 flex items-center justify-between sm:justify-end gap-1.5 pt-1 sm:pt-0">
                           <span className="sm:hidden text-[10px] font-extrabold text-slate-700 uppercase tracking-wider">
                             Allocation % & Status
                           </span>
-                          <div className="flex items-center justify-end gap-2 shrink-0">
+                          <div className="flex items-center justify-end gap-1.5 shrink-0">
                             {/* Changed Icon & Tag */}
                             {row.changed ? (
                               <button
@@ -1799,25 +1814,24 @@ export default function App() {
                                 title="Mark project as changed"
                               >
                                 <Zap className="w-3.5 h-3.5" />
-                                <span className="hidden lg:inline text-[10px] text-slate-500">Mark</span>
                               </button>
                             )}
 
                             {/* Allocation % Input */}
-                            <div className="relative w-20 flex items-center shrink-0">
+                            <div className="relative w-18 flex items-center shrink-0">
                               <input
                                 type="number"
                                 min="0"
                                 max="200"
                                 value={row.percent === 0 && row.project === '' ? '' : row.percent}
                                 onChange={e => handleRowChange(idx, 'percent', e.target.value)}
-                                className={`w-full pl-2 pr-6 py-2 text-sm font-bold bg-white border ${
+                                className={`w-full pl-2 pr-5 py-2 text-sm font-bold bg-white border ${
                                   row.changed 
                                     ? 'border-amber-300 text-amber-900 focus:border-amber-500 focus:ring-amber-100' 
                                     : 'border-slate-200 text-slate-800 hover:border-slate-300 focus:border-blue-500 focus:ring-blue-100'
                                 } rounded-xl outline-none focus:ring-2 text-right transition-all shadow-2xs`}
                               />
-                              <span className="absolute right-2 text-xs font-bold text-slate-400 pointer-events-none">%</span>
+                              <span className="absolute right-1.5 text-xs font-bold text-slate-400 pointer-events-none">%</span>
                             </div>
 
                             {/* Delete Button */}

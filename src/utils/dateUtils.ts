@@ -94,8 +94,37 @@ export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate: Date
     currentWeeks[0].startDate === currentWeek.startDate &&
     currentWeeks[1].startDate === nextWeek.startDate;
 
-  const updatedAllocations: Record<string, AllocationItem[]> = { ...prevData.allocations };
+  const updatedAllocations: Record<string, AllocationItem[]> = { ...(prevData.allocations || {}) };
 
+  // If the weeks already match the rolling 2-week window, retain all existing allocations intact
+  if (hasExactWeeks) {
+    prevData.staff.forEach(staff => {
+      const currentKey = `${staff.id}_${currentWeek.id}`;
+      const nextKey = `${staff.id}_${nextWeek.id}`;
+
+      // Only provide default if completely missing (undefined)
+      if (updatedAllocations[currentKey] === undefined) {
+        updatedAllocations[currentKey] = [
+          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
+        ];
+      }
+      if (updatedAllocations[nextKey] === undefined) {
+        updatedAllocations[nextKey] = (updatedAllocations[currentKey] || []).map(item => ({
+          ...item,
+          changed: false,
+        }));
+      }
+    });
+
+    return {
+      ...prevData,
+      staff: (prevData.staff || []).slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
+      weeks: rollingWeeks,
+      allocations: updatedAllocations,
+    };
+  }
+
+  // Calendar week transition has occurred: roll allocations forward
   prevData.staff.forEach(staff => {
     const currentKey = `${staff.id}_${currentWeek.id}`;
     const nextKey = `${staff.id}_${nextWeek.id}`;
@@ -110,7 +139,6 @@ export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate: Date
         sourceForCurrent = updatedAllocations[`${staff.id}_${matchedPreviousWeek.id}`];
       } else {
         // Find the most recent available allocation for this staff member in any previous week
-        // Look through currentWeeks in reverse order, or legacy w2, w1 keys
         let fallbackFound: AllocationItem[] | undefined;
         for (let i = currentWeeks.length - 1; i >= 0; i--) {
           const w = currentWeeks[i];
@@ -127,7 +155,6 @@ export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate: Date
           } else if (updatedAllocations[`${staff.id}_w1`]?.length) {
             fallbackFound = updatedAllocations[`${staff.id}_w1`];
           } else {
-            // Find any key for this staff
             const staffKeys = Object.keys(updatedAllocations).filter(k => k.startsWith(`${staff.id}_`));
             if (staffKeys.length > 0) {
               fallbackFound = updatedAllocations[staffKeys[staffKeys.length - 1]];
@@ -157,19 +184,16 @@ export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate: Date
     let sourceForNext: AllocationItem[] | undefined = updatedAllocations[nextKey];
 
     if (!sourceForNext || sourceForNext.length === 0) {
-      // Check if next week was previously configured
       const matchedNextWeek = currentWeeks.find(w => w.startDate === nextWeek.startDate);
       if (matchedNextWeek && updatedAllocations[`${staff.id}_${matchedNextWeek.id}`]?.length) {
         sourceForNext = updatedAllocations[`${staff.id}_${matchedNextWeek.id}`];
       } else {
-        // Automatically copy all valid allocations from the new Current Week to Next Week
         sourceForNext = validCurrentItems;
       }
     }
 
     const validNextItems = filterActiveAllocations(sourceForNext || validCurrentItems, nextWeek.startDate);
 
-    // Determine change flag: if next week matches current week, changed is false; if percent differs, mark changed
     updatedAllocations[nextKey] = validNextItems.map(nextItem => {
       const currentMatching = validCurrentItems.find(c => c.project.toLowerCase() === nextItem.project.toLowerCase());
       const hasChangedPct = currentMatching ? currentMatching.percent !== nextItem.percent : false;

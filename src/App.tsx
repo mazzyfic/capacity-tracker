@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Chart, registerables } from 'chart.js';
 import { 
   Users, 
@@ -84,6 +84,35 @@ export default function App() {
     return syncRollingWeeksAndAllocations(getDefaultTeamData(activeId));
   });
 
+  const lastSavedJsonRef = useRef<string>('');
+
+  const getTeamDocId = (teamId: string) => {
+    if (teamId === 'theglobal5' || teamId === 'team_mazzy') return 'theglobal5_state';
+    if (teamId === 'team_marcus' || teamId === 'team_kimyatta') return 'team_team_kimyatta';
+    return `team_${teamId}`;
+  };
+
+  const persistAppData = useCallback((nextData: AppData) => {
+    const jsonStr = JSON.stringify(nextData);
+    lastSavedJsonRef.current = jsonStr;
+    setAppData(nextData);
+    try {
+      localStorage.setItem(`g5_team_${currentTeamId}`, jsonStr);
+      localStorage.setItem('g5_active_team_id', currentTeamId);
+    } catch (e) {
+      console.error('Failed to persist to localStorage', e);
+    }
+
+    const docId = getTeamDocId(currentTeamId);
+    const docRef = doc(db, FIRESTORE_COLLECTION, docId);
+    setDoc(docRef, nextData, { merge: true })
+      .then(() => setCloudStatus('connected'))
+      .catch(err => {
+        console.error('Error saving data to Firestore:', err);
+        setCloudStatus('error');
+      });
+  }, [currentTeamId]);
+
   // Keep browser tab title strictly as FFID Capacity Tracker
   useEffect(() => {
     document.title = 'FFID Capacity Tracker';
@@ -143,10 +172,7 @@ export default function App() {
     setIsInitialLoad(true);
     setCloudStatus('syncing');
 
-    // Document ID for active team
-    const docId = (currentTeamId === 'theglobal5' || currentTeamId === 'team_mazzy') 
-      ? 'theglobal5_state' 
-      : (currentTeamId === 'team_marcus' || currentTeamId === 'team_kimyatta' ? 'team_team_kimyatta' : `team_${currentTeamId}`);
+    const docId = getTeamDocId(currentTeamId);
     const docRef = doc(db, FIRESTORE_COLLECTION, docId);
     
     const unsubscribe = onSnapshot(
@@ -155,6 +181,14 @@ export default function App() {
         if (snapshot.exists()) {
           const remoteData = snapshot.data() as AppData;
           if (remoteData && Array.isArray(remoteData.staff) && remoteData.staff.length > 0) {
+            const rawJson = JSON.stringify(remoteData);
+            // Skip re-setting state if this snapshot reflects our own saved data
+            if (rawJson === lastSavedJsonRef.current) {
+              setCloudStatus('connected');
+              setIsInitialLoad(false);
+              return;
+            }
+
             const cleanedData = { ...remoteData };
             
             // Clean up Team 1 (Team Mazzy)
@@ -180,21 +214,6 @@ export default function App() {
               if (cleanedData.teamTitle === 'Team Marcus Capacity Tracker' || cleanedData.teamTitle === 'Team Kimyatta Capacity Tracker' || !cleanedData.teamTitle) {
                 cleanedData.teamTitle = 'Team Kimyatta';
               }
-              const targetNames = ['Anna', 'Belle', 'Caroline', 'Jenna', 'Kelley', 'Kimyatta'];
-              // Ensure the staff names are locked to the target names in alphabetical order
-              if (Array.isArray(cleanedData.staff)) {
-                cleanedData.staff = cleanedData.staff.map((s, idx) => ({
-                  ...s,
-                  name: targetNames[idx] || s.name,
-                }));
-                // If fewer than 6, add missing
-                for (let i = cleanedData.staff.length; i < targetNames.length; i++) {
-                  cleanedData.staff.push({
-                    id: `staff_kimyatta_${i + 1}`,
-                    name: targetNames[i],
-                  });
-                }
-              }
               const kimyattaMember = cleanedData.staff.find(s => s.name.toLowerCase() === 'kimyatta') || cleanedData.staff[0];
               if (kimyattaMember) {
                 cleanedData.teamLeadId = kimyattaMember.id;
@@ -208,15 +227,18 @@ export default function App() {
               );
             }
 
-            skipNextCloudSave.current = true;
-            setAppData(syncRollingWeeksAndAllocations(cleanedData));
+            const synchronized = syncRollingWeeksAndAllocations(cleanedData);
+            lastSavedJsonRef.current = JSON.stringify(synchronized);
+            setAppData(synchronized);
           }
         } else {
           // Document does not exist yet; seed it with current team default data
           const initialData = syncRollingWeeksAndAllocations(getDefaultTeamData(currentTeamId));
+          lastSavedJsonRef.current = JSON.stringify(initialData);
           setDoc(docRef, initialData).catch(err => {
             console.error('Error seeding initial team Firestore doc:', err);
           });
+          setAppData(initialData);
         }
         setCloudStatus('connected');
         setIsInitialLoad(false);
@@ -234,37 +256,31 @@ export default function App() {
   // 3. Save active team changes to Firestore and localStorage
   useEffect(() => {
     // Sync to team-specific localStorage
+    const currentJson = JSON.stringify(appData);
     try {
-      localStorage.setItem(`g5_team_${currentTeamId}`, JSON.stringify(appData));
+      localStorage.setItem(`g5_team_${currentTeamId}`, currentJson);
       localStorage.setItem('g5_active_team_id', currentTeamId);
     } catch (e) {
       console.error('Failed to persist team to localStorage', e);
     }
 
-    // Skip saving to cloud if this update came from the remote snapshot
-    if (skipNextCloudSave.current) {
-      skipNextCloudSave.current = false;
-      return;
-    }
-
     if (!isInitialLoad) {
+      if (currentJson === lastSavedJsonRef.current) {
+        return;
+      }
       setCloudStatus('syncing');
-      const docId = (currentTeamId === 'theglobal5' || currentTeamId === 'team_mazzy') 
-        ? 'theglobal5_state' 
-        : (currentTeamId === 'team_marcus' || currentTeamId === 'team_kimyatta' ? 'team_team_kimyatta' : `team_${currentTeamId}`);
+      const docId = getTeamDocId(currentTeamId);
       const docRef = doc(db, FIRESTORE_COLLECTION, docId);
-      const timer = setTimeout(() => {
-        setDoc(docRef, appData, { merge: true })
-          .then(() => {
-            setCloudStatus('connected');
-          })
-          .catch((err) => {
-            console.error('Failed to update Firestore team document:', err);
-            setCloudStatus('error');
-          });
-      }, 300);
-
-      return () => clearTimeout(timer);
+      lastSavedJsonRef.current = currentJson;
+      
+      setDoc(docRef, appData, { merge: true })
+        .then(() => {
+          setCloudStatus('connected');
+        })
+        .catch((err) => {
+          console.error('Failed to update Firestore team document:', err);
+          setCloudStatus('error');
+        });
     }
   }, [appData, currentTeamId, isInitialLoad]);
 
@@ -709,11 +725,11 @@ export default function App() {
     const nextKey = `${modalStaffId}_${targetWeek.id}`;
     const currentValidRows = modalRows.filter(r => r.project.trim() !== '');
 
-    setAppData(prev => ({
-      ...prev,
+    const nextAppData: AppData = {
+      ...appData,
       weeks: nextWeeks,
       allocations: {
-        ...prev.allocations,
+        ...appData.allocations,
         [nextKey]: currentValidRows.map(r => ({ 
           project: r.project.trim(), 
           percent: Number(r.percent) || 0, 
@@ -722,8 +738,9 @@ export default function App() {
           endDate: r.endDate || ''
         })),
       },
-    }));
+    };
 
+    persistAppData(nextAppData);
     showToast(`Duplicated allocations to next week (${targetWeek.label})`);
   };
 
@@ -735,25 +752,24 @@ export default function App() {
       return;
     }
 
-    setAppData(prev => {
-      const updatedAllocations: Record<string, AllocationItem[]> = { ...prev.allocations };
-      prev.staff.forEach(staff => {
-        const currentKey = `${staff.id}_${currentW.id}`;
-        const nextKey = `${staff.id}_${nextW.id}`;
-        const currentList = prev.allocations[currentKey] || [];
-        const activeItems = filterActiveAllocations(currentList, nextW.startDate);
-        updatedAllocations[nextKey] = activeItems.map(item => ({
-          ...item,
-          changed: false,
-        }));
-      });
-
-      return {
-        ...prev,
-        allocations: updatedAllocations,
-      };
+    const updatedAllocations: Record<string, AllocationItem[]> = { ...appData.allocations };
+    appData.staff.forEach(staff => {
+      const currentKey = `${staff.id}_${currentW.id}`;
+      const nextKey = `${staff.id}_${nextW.id}`;
+      const currentList = appData.allocations[currentKey] || [];
+      const activeItems = filterActiveAllocations(currentList, nextW.startDate);
+      updatedAllocations[nextKey] = activeItems.map(item => ({
+        ...item,
+        changed: false,
+      }));
     });
 
+    const nextAppData: AppData = {
+      ...appData,
+      allocations: updatedAllocations,
+    };
+
+    persistAppData(nextAppData);
     showToast(`Copied all team allocations from Current Week to Next Week (${nextW.label})`);
   };
 
@@ -793,13 +809,15 @@ export default function App() {
         };
       });
 
-    setAppData(prev => ({
-      ...prev,
+    const nextAppData: AppData = {
+      ...appData,
       allocations: {
-        ...prev.allocations,
+        ...appData.allocations,
         [key]: updatedList,
       },
-    }));
+    };
+
+    persistAppData(nextAppData);
 
     const message = typeof customToastMsg === 'string' ? customToastMsg : 'Allocations saved successfully';
     showToast(message);
@@ -808,15 +826,14 @@ export default function App() {
 
   // Staff Notes Update Handler
   const handleUpdateStaffNotes = (staffId: string, noteText: string) => {
-    setAppData(prev => {
-      const updatedNotes = { ...(prev.notes || {}), [staffId]: noteText };
-      const updatedStaff = prev.staff.map(s => s.id === staffId ? { ...s, notes: noteText } : s);
-      return {
-        ...prev,
-        notes: updatedNotes,
-        staff: updatedStaff,
-      };
-    });
+    const updatedNotes = { ...(appData.notes || {}), [staffId]: noteText };
+    const updatedStaff = appData.staff.map(s => s.id === staffId ? { ...s, notes: noteText } : s);
+    const nextAppData: AppData = {
+      ...appData,
+      notes: updatedNotes,
+      staff: updatedStaff,
+    };
+    persistAppData(nextAppData);
   };
 
   // CSV Export

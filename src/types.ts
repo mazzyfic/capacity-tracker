@@ -37,3 +37,15 @@ export interface TeamSummary {
   name: string;
   leadName: string;
 }
+
+export interface DataSnapshot {
+  id: string;
+  name: string;
+  createdAt: string;
+  createdBy: string;
+  description?: string;
+  teamId: string;
+  teamTitle: string;
+  data: AppData;
+}
+

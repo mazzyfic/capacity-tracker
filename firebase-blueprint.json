@@ -53,6 +53,10 @@
     "/capacity_tracker/{teamDocId}": {
       "schema": "TeamDocument",
       "description": "Team capacity state document"
+    },
+    "/capacity_snapshots/{snapshotId}": {
+      "schema": "TeamDocument",
+      "description": "Historical backup and revert snapshots"
     }
   }
 }

@@ -22,7 +22,12 @@ import {
   CloudOff,
   RefreshCw,
   MessageSquare,
-  GripVertical
+  GripVertical,
+  Shield,
+  RotateCcw,
+  Crown,
+  Lock,
+  User,
 } from 'lucide-react';
 import { StaffMember, WeekHorizon, AllocationItem, AppData, TeamSummary } from './types';
 import { 
@@ -35,7 +40,9 @@ import {
 } from './utils/dateUtils';
 import { DEFAULT_TEAMS_LIST, getDefaultTeamData } from './data/defaultTeams';
 import { TeamSwitcher } from './components/TeamSwitcher';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { AdminPortalModal } from './components/AdminPortalModal';
+import { RevertDateModal } from './components/RevertDateModal';
+import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
 Chart.register(...registerables);
@@ -125,6 +132,111 @@ export default function App() {
         setCloudStatus('error');
       });
   }, [currentTeamId]);
+
+  // Admin Account & Portal State
+  const [adminPortalOpen, setAdminPortalOpen] = useState(false);
+  const [adminUser, setAdminUser] = useState<{ email: string; name: string } | null>(() => {
+    try {
+      const stored = localStorage.getItem('tracker_admin_user');
+      if (stored) return JSON.parse(stored);
+    } catch (e) {}
+    // Default pre-authorized super admin session
+    return { email: 'mazlan.hasan@emeritus.org', name: 'Mazlan Hasan' };
+  });
+
+  const handleAdminLogin = (email: string) => {
+    const user = { email, name: email.split('@')[0] };
+    setAdminUser(user);
+    localStorage.setItem('tracker_admin_user', JSON.stringify(user));
+  };
+
+  const handleAdminLogout = () => {
+    setAdminUser(null);
+    localStorage.removeItem('tracker_admin_user');
+  };
+
+  const handleRevertTeamData = async (teamId: string, newData: AppData) => {
+    const docId = getTeamDocId(teamId);
+    const synchronized = syncRollingWeeksAndAllocations(newData);
+    const jsonStr = JSON.stringify(synchronized);
+    
+    // Save to Firestore without merge so it completely overwrites to older data!
+    await setDoc(doc(db, FIRESTORE_COLLECTION, docId), synchronized);
+    localStorage.setItem(`tracker_team_${teamId}`, jsonStr);
+    
+    if (teamId === currentTeamId) {
+      lastSavedJsonRef.current = jsonStr;
+      setAppData(synchronized);
+    }
+  };
+
+  const handleRevertAllTeams = async (teamsData: Record<string, any>) => {
+    for (const [key, val] of Object.entries(teamsData)) {
+      if (key === 'teams_registry') continue;
+      let targetId = key;
+      if (key === 'theglobal5_state') targetId = 'team_mazzy';
+      if (key === 'team_team_kimyatta') targetId = 'team_kimyatta';
+      if (key === 'team_team_lindsay') targetId = 'team_lindsay';
+      if (['team_mazzy', 'team_kimyatta', 'team_lindsay'].includes(targetId)) {
+        const synchronized = syncRollingWeeksAndAllocations(val as AppData);
+        await setDoc(doc(db, FIRESTORE_COLLECTION, targetId), synchronized);
+        localStorage.setItem(`tracker_team_${targetId}`, JSON.stringify(synchronized));
+        if (targetId === currentTeamId) {
+          lastSavedJsonRef.current = JSON.stringify(synchronized);
+          setAppData(synchronized);
+        }
+      }
+    }
+  };
+
+  const [revertDateModalOpen, setRevertDateModalOpen] = useState(false);
+
+  const handleRevertToDate = async (targetDateIso: string, customData?: AppData) => {
+    const docId = getTeamDocId(currentTeamId);
+    let targetBaseDate: Date;
+    try {
+      targetBaseDate = parseDateIso(targetDateIso);
+    } catch (e) {
+      targetBaseDate = new Date();
+    }
+
+    let sourceData = customData;
+    if (!sourceData) {
+      // If no customData passed, check if there's a stored baseline for Sep 3 in theglobal5_state or capacity_snapshots
+      if (currentTeamId === 'team_mazzy' && targetDateIso <= '2026-09-03') {
+        try {
+          const global5Snap = await getDoc(doc(db, FIRESTORE_COLLECTION, 'theglobal5_state'));
+          if (global5Snap.exists()) {
+            sourceData = global5Snap.data() as AppData;
+          }
+        } catch (e) {
+          console.error('Failed to get theglobal5_state', e);
+        }
+      }
+      if (!sourceData) {
+        sourceData = { ...appData };
+      }
+    }
+
+    // Clean and normalize team info
+    const cleaned: AppData = { ...sourceData };
+    if (currentTeamId === 'team_mazzy') {
+      cleaned.teamTitle = 'Team Mazzy';
+      const mazzyMember = cleaned.staff.find(s => s.name.toLowerCase() === 'mazzy');
+      if (mazzyMember) cleaned.teamLeadId = mazzyMember.id;
+    }
+
+    const synchronized = syncRollingWeeksAndAllocations(cleaned, targetBaseDate);
+    const jsonStr = JSON.stringify(synchronized);
+
+    // Save to Firestore without merge so it completely overwrites to older data!
+    await setDoc(doc(db, FIRESTORE_COLLECTION, docId), synchronized);
+    localStorage.setItem(`tracker_team_${currentTeamId}`, jsonStr);
+
+    lastSavedJsonRef.current = jsonStr;
+    setAppData(synchronized);
+    setCloudStatus('connected');
+  };
 
   // Keep browser tab title strictly as FFID Capacity Tracker
   useEffect(() => {
@@ -1189,6 +1301,17 @@ export default function App() {
           </button>
 
           <button
+            id="revertToEarlierDateBtn"
+            type="button"
+            onClick={() => setRevertDateModalOpen(true)}
+            className="px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold rounded-lg shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+            title="Revert current data to an earlier date"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
+            <span>Revert to Earlier Date</span>
+          </button>
+
+          <button
             id="exportCsvBtn"
             type="button"
             onClick={exportToCSV}
@@ -1197,6 +1320,21 @@ export default function App() {
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
             <span className="hidden sm:inline">Export CSV</span>
+          </button>
+
+          <button
+            id="adminPortalBtn"
+            type="button"
+            onClick={() => setAdminPortalOpen(true)}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
+              adminUser
+                ? 'bg-indigo-50 hover:bg-indigo-100 border-indigo-200 text-indigo-700'
+                : 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700'
+            }`}
+            title="Admin Data Revert & Backup Portal"
+          >
+            <Shield className={`w-3.5 h-3.5 ${adminUser ? 'text-indigo-600' : 'text-slate-500'}`} />
+            <span>Admin Portal</span>
           </button>
         </div>
       </header>
@@ -2123,6 +2261,30 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Revert Date Modal */}
+      <RevertDateModal
+        isOpen={revertDateModalOpen}
+        onClose={() => setRevertDateModalOpen(false)}
+        currentTeamId={currentTeamId}
+        currentTeamTitle={appData.teamTitle}
+        appData={appData}
+        onRevertToDate={handleRevertToDate}
+      />
+
+      {/* Admin Portal Modal */}
+      <AdminPortalModal
+        isOpen={adminPortalOpen}
+        onClose={() => setAdminPortalOpen(false)}
+        currentTeamId={currentTeamId}
+        currentTeamTitle={appData.teamTitle}
+        appData={appData}
+        onRevertTeamData={handleRevertTeamData}
+        onRevertAllTeams={handleRevertAllTeams}
+        adminUser={adminUser}
+        onAdminLogin={handleAdminLogin}
+        onAdminLogout={handleAdminLogout}
+      />
     </div>
   );
 }

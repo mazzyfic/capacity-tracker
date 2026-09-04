@@ -83,130 +83,82 @@ export function filterActiveAllocations(items: AllocationItem[], weekStartDate: 
 /**
  * Ensures that appData has the active 2-week rolling window and automatically copies
  * previous week allocations over when a new week arrives so no manual re-entry is needed.
+ * Every new week added is an exact duplicate of the previous week.
  */
 export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate: Date = new Date()): AppData {
   const rollingWeeks = getRolling2Weeks(baseDate);
   const [currentWeek, nextWeek] = rollingWeeks;
 
   const currentWeeks = prevData.weeks || [];
-  const hasExactWeeks =
-    currentWeeks.length >= 2 &&
-    currentWeeks[0].startDate === currentWeek.startDate &&
-    currentWeeks[1].startDate === nextWeek.startDate;
-
   const updatedAllocations: Record<string, AllocationItem[]> = { ...(prevData.allocations || {}) };
 
-  // If the weeks already match the rolling 2-week window, retain all existing allocations intact
-  if (hasExactWeeks) {
-    prevData.staff.forEach(staff => {
-      const currentKey = `${staff.id}_${currentWeek.id}`;
-      const nextKey = `${staff.id}_${nextWeek.id}`;
+  const staffList = (prevData.staff || []).slice().sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+  );
 
-      // Only provide default if completely missing (undefined)
-      if (updatedAllocations[currentKey] === undefined) {
-        updatedAllocations[currentKey] = [
-          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
-        ];
-      }
-      if (updatedAllocations[nextKey] === undefined) {
-        updatedAllocations[nextKey] = (updatedAllocations[currentKey] || []).map(item => ({
-          ...item,
-          changed: false,
-        }));
-      }
-    });
-
-    return {
-      ...prevData,
-      staff: (prevData.staff || []).slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
-      weeks: rollingWeeks,
-      allocations: updatedAllocations,
-    };
-  }
-
-  // Calendar week transition has occurred: roll allocations forward
-  prevData.staff.forEach(staff => {
+  staffList.forEach(staff => {
     const currentKey = `${staff.id}_${currentWeek.id}`;
     const nextKey = `${staff.id}_${nextWeek.id}`;
 
-    // 1. Resolve Current Week Allocations
-    let sourceForCurrent: AllocationItem[] | undefined = updatedAllocations[currentKey];
+    // 1. Current Week Allocations
+    let currentItems = updatedAllocations[currentKey];
 
-    if (!sourceForCurrent || sourceForCurrent.length === 0) {
-      // Check if this week was previously configured as Week 2 or by date match in currentWeeks
-      const matchedPreviousWeek = currentWeeks.find(w => w.startDate === currentWeek.startDate);
-      if (matchedPreviousWeek && updatedAllocations[`${staff.id}_${matchedPreviousWeek.id}`]?.length) {
-        sourceForCurrent = updatedAllocations[`${staff.id}_${matchedPreviousWeek.id}`];
+    if (!currentItems || currentItems.length === 0) {
+      // Check if this week was previously configured in currentWeeks
+      const matchedWeek = currentWeeks.find(w => w.startDate === currentWeek.startDate);
+      if (matchedWeek && updatedAllocations[`${staff.id}_${matchedWeek.id}`]?.length) {
+        currentItems = updatedAllocations[`${staff.id}_${matchedWeek.id}`];
       } else {
-        // Find the most recent available allocation for this staff member in any previous week
-        let fallbackFound: AllocationItem[] | undefined;
-        for (let i = currentWeeks.length - 1; i >= 0; i--) {
-          const w = currentWeeks[i];
-          const candidate = updatedAllocations[`${staff.id}_${w.id}`];
-          if (candidate && candidate.length > 0) {
-            fallbackFound = candidate;
-            break;
-          }
+        // Find the most recent recorded allocation for this staff member in any week
+        const staffKeys = Object.keys(updatedAllocations)
+          .filter(k => k.startsWith(`${staff.id}_`))
+          .sort();
+        if (staffKeys.length > 0) {
+          currentItems = updatedAllocations[staffKeys[staffKeys.length - 1]];
         }
-
-        if (!fallbackFound) {
-          if (updatedAllocations[`${staff.id}_w2`]?.length) {
-            fallbackFound = updatedAllocations[`${staff.id}_w2`];
-          } else if (updatedAllocations[`${staff.id}_w1`]?.length) {
-            fallbackFound = updatedAllocations[`${staff.id}_w1`];
-          } else {
-            const staffKeys = Object.keys(updatedAllocations).filter(k => k.startsWith(`${staff.id}_`));
-            if (staffKeys.length > 0) {
-              fallbackFound = updatedAllocations[staffKeys[staffKeys.length - 1]];
-            }
-          }
-        }
-
-        sourceForCurrent = fallbackFound;
       }
+
+      // If still nothing (brand new staff member with no history)
+      if (!currentItems || currentItems.length === 0) {
+        currentItems = [
+          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
+        ];
+      }
+
+      updatedAllocations[currentKey] = currentItems.map(item => ({
+        ...item,
+        changed: item.changed || false,
+      }));
     }
 
-    if (!sourceForCurrent || sourceForCurrent.length === 0) {
-      sourceForCurrent = [
-        { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
-      ];
-    }
+    // 2. Next Week Allocations: Duplicate the current week's allocations
+    let nextItems = updatedAllocations[nextKey];
 
-    // Filter out past-due projects whose end date elapsed before the current week
-    const validCurrentItems = filterActiveAllocations(sourceForCurrent, currentWeek.startDate);
-
-    updatedAllocations[currentKey] = validCurrentItems.map(item => ({
-      ...item,
-      changed: item.changed || false,
-    }));
-
-    // 2. Resolve Next Week Allocations (Copy forward from Current Week)
-    let sourceForNext: AllocationItem[] | undefined = updatedAllocations[nextKey];
-
-    if (!sourceForNext || sourceForNext.length === 0) {
-      const matchedNextWeek = currentWeeks.find(w => w.startDate === nextWeek.startDate);
-      if (matchedNextWeek && updatedAllocations[`${staff.id}_${matchedNextWeek.id}`]?.length) {
-        sourceForNext = updatedAllocations[`${staff.id}_${matchedNextWeek.id}`];
+    if (!nextItems || nextItems.length === 0) {
+      const matchedNext = currentWeeks.find(w => w.startDate === nextWeek.startDate);
+      if (matchedNext && updatedAllocations[`${staff.id}_${matchedNext.id}`]?.length) {
+        nextItems = updatedAllocations[`${staff.id}_${matchedNext.id}`];
       } else {
-        sourceForNext = validCurrentItems;
+        // Duplicate the current week's allocations directly
+        nextItems = updatedAllocations[currentKey];
       }
+
+      if (!nextItems || nextItems.length === 0) {
+        nextItems = [
+          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
+        ];
+      }
+
+      updatedAllocations[nextKey] = nextItems.map(item => ({
+        ...item,
+        changed: false,
+      }));
     }
-
-    const validNextItems = filterActiveAllocations(sourceForNext || validCurrentItems, nextWeek.startDate);
-
-    updatedAllocations[nextKey] = validNextItems.map(nextItem => {
-      const currentMatching = validCurrentItems.find(c => c.project.toLowerCase() === nextItem.project.toLowerCase());
-      const hasChangedPct = currentMatching ? currentMatching.percent !== nextItem.percent : false;
-      return {
-        ...nextItem,
-        changed: nextItem.changed ?? hasChangedPct,
-      };
-    });
   });
 
   return {
     ...prevData,
-    staff: (prevData.staff || []).slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
+    staff: staffList,
     weeks: rollingWeeks,
     allocations: updatedAllocations,
   };

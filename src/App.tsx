@@ -50,7 +50,7 @@ export default function App() {
   // Teams List & Active Team ID
   const [teamsList, setTeamsList] = useState<TeamSummary[]>(() => {
     try {
-      const stored = localStorage.getItem('g5_teams_list_v1');
+      const stored = localStorage.getItem('tracker_teams_list');
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -61,16 +61,28 @@ export default function App() {
     return DEFAULT_TEAMS_LIST;
   });
 
-  const [currentTeamId, setCurrentTeamId] = useState<string>(() => {
-    return localStorage.getItem('g5_active_team_id') || 'theglobal5';
-  });
+  const getInitialTeamId = () => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const teamParam = urlParams.get('team')?.toLowerCase();
+      if (teamParam === 'kimyatta' || teamParam === 'team_kimyatta') return 'team_kimyatta';
+      if (teamParam === 'lindsay' || teamParam === 'team_lindsay') return 'team_lindsay';
+      if (teamParam === 'mazzy' || teamParam === 'team_mazzy') return 'team_mazzy';
+    } catch (e) {}
+    const stored = localStorage.getItem('tracker_active_team_id');
+    if (stored === 'team_kimyatta' || stored === 'team_lindsay' || stored === 'team_mazzy') {
+      return stored;
+    }
+    return 'team_mazzy';
+  };
+
+  const [currentTeamId, setCurrentTeamId] = useState<string>(getInitialTeamId);
 
   // App Data for the active team
   const [appData, setAppData] = useState<AppData>(() => {
+    const activeId = getInitialTeamId();
     try {
-      const activeId = localStorage.getItem('g5_active_team_id') || 'theglobal5';
-      const raw = localStorage.getItem(`g5_team_${activeId}`) || 
-                  (activeId === 'theglobal5' ? (localStorage.getItem('g5_workload_tracker_rolling_v1') || localStorage.getItem('g5_workload_tracker_2week_v5')) : null);
+      const raw = localStorage.getItem(`tracker_team_${activeId}`);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && Array.isArray(parsed.staff) && parsed.staff.length > 0) {
@@ -80,16 +92,17 @@ export default function App() {
     } catch (e) {
       console.error('Failed to parse local storage team data', e);
     }
-    const activeId = localStorage.getItem('g5_active_team_id') || 'theglobal5';
     return syncRollingWeeksAndAllocations(getDefaultTeamData(activeId));
   });
 
   const lastSavedJsonRef = useRef<string>('');
+  const isRemoteLoadedRef = useRef<boolean>(false);
 
-  const getTeamDocId = (teamId: string) => {
-    if (teamId === 'theglobal5' || teamId === 'team_mazzy') return 'theglobal5_state';
-    if (teamId === 'team_marcus' || teamId === 'team_kimyatta') return 'team_team_kimyatta';
-    return `team_${teamId}`;
+  const getTeamDocId = (teamId: string): string => {
+    if (teamId === 'team_kimyatta' || teamId === 'team_lindsay' || teamId === 'team_mazzy') {
+      return teamId;
+    }
+    return 'team_mazzy';
   };
 
   const persistAppData = useCallback((nextData: AppData) => {
@@ -97,8 +110,8 @@ export default function App() {
     lastSavedJsonRef.current = jsonStr;
     setAppData(nextData);
     try {
-      localStorage.setItem(`g5_team_${currentTeamId}`, jsonStr);
-      localStorage.setItem('g5_active_team_id', currentTeamId);
+      localStorage.setItem(`tracker_team_${currentTeamId}`, jsonStr);
+      localStorage.setItem('tracker_active_team_id', currentTeamId);
     } catch (e) {
       console.error('Failed to persist to localStorage', e);
     }
@@ -128,28 +141,35 @@ export default function App() {
           const data = snapshot.data();
           if (Array.isArray(data?.teams) && data.teams.length > 0) {
             let hasChanged = false;
-            const normalizedTeams = data.teams.map((t: any) => {
-              if (t.id === 'theglobal5' || t.name === 'FFID' || t.name === 'TheGlobal5') {
-                if (t.name !== 'Team Mazzy' || t.leadName !== 'Mazzy') hasChanged = true;
-                return { ...t, id: 'theglobal5', name: 'Team Mazzy', leadName: 'Mazzy' };
+            const validIds = new Set(['team_mazzy', 'team_kimyatta', 'team_lindsay']);
+            const cleanTeams: TeamSummary[] = DEFAULT_TEAMS_LIST.map(def => {
+              const matched = data.teams.find((t: any) => t.id === def.id);
+              if (matched) {
+                if (matched.name !== def.name || matched.leadName !== def.leadName) {
+                  hasChanged = true;
+                }
+                return {
+                  id: def.id,
+                  name: matched.name || def.name,
+                  leadName: matched.leadName || def.leadName,
+                };
               }
-              if (t.id === 'team_marcus' || t.name === 'Team Marcus' || t.id === 'team_kimyatta') {
-                if (t.name !== 'Team Kimyatta' || t.leadName !== 'Kimyatta') hasChanged = true;
-                return { ...t, id: 'team_kimyatta', name: 'Team Kimyatta', leadName: 'Kimyatta' };
-              }
-              if (t.id === 'team_lindsay') {
-                return { ...t, name: 'Team Lindsay', leadName: 'Lindsay' };
-              }
-              return t;
+              hasChanged = true;
+              return def;
             });
-            setTeamsList(normalizedTeams);
+
+            if (data.teams.length !== 3 || data.teams.some((t: any) => !validIds.has(t.id))) {
+              hasChanged = true;
+            }
+
+            setTeamsList(cleanTeams);
             try {
-              localStorage.setItem('g5_teams_list_v1', JSON.stringify(normalizedTeams));
+              localStorage.setItem('tracker_teams_list', JSON.stringify(cleanTeams));
             } catch (e) {}
 
-            // Persist repaired names back to Firestore if legacy names existed
+            // Persist repaired registry back to Firestore if legacy existed
             if (hasChanged) {
-              setDoc(regRef, { teams: normalizedTeams }, { merge: true }).catch(console.error);
+              setDoc(regRef, { teams: cleanTeams }, { merge: true }).catch(console.error);
             }
           }
         } else {
@@ -170,6 +190,7 @@ export default function App() {
   // 2. Real-time Firestore sync listener for active team
   useEffect(() => {
     setIsInitialLoad(true);
+    isRemoteLoadedRef.current = false;
     setCloudStatus('syncing');
 
     const docId = getTeamDocId(currentTeamId);
@@ -178,6 +199,14 @@ export default function App() {
     const unsubscribe = onSnapshot(
       docRef,
       (snapshot) => {
+        if (snapshot.metadata.hasPendingWrites) {
+          // Local pending writes: state in memory is already up to date, skip reverting
+          setCloudStatus('connected');
+          setIsInitialLoad(false);
+          isRemoteLoadedRef.current = true;
+          return;
+        }
+
         if (snapshot.exists()) {
           const remoteData = snapshot.data() as AppData;
           if (remoteData && Array.isArray(remoteData.staff) && remoteData.staff.length > 0) {
@@ -186,16 +215,15 @@ export default function App() {
             if (rawJson === lastSavedJsonRef.current) {
               setCloudStatus('connected');
               setIsInitialLoad(false);
+              isRemoteLoadedRef.current = true;
               return;
             }
 
             const cleanedData = { ...remoteData };
             
             // Clean up Team 1 (Team Mazzy)
-            if (currentTeamId === 'theglobal5' || currentTeamId === 'team_mazzy') {
-              if (cleanedData.teamTitle === 'TheGlobal5 Capacity Tracker' || cleanedData.teamTitle === 'FFID Capacity Tracker' || cleanedData.teamTitle === 'Team Mazzy Capacity Tracker' || !cleanedData.teamTitle) {
-                cleanedData.teamTitle = 'Team Mazzy';
-              }
+            if (currentTeamId === 'team_mazzy') {
+              cleanedData.teamTitle = 'Team Mazzy';
               const mazzyMember = cleanedData.staff.find(s => s.name.toLowerCase() === 'mazzy');
               if (mazzyMember && cleanedData.teamLeadId !== mazzyMember.id) {
                 cleanedData.teamLeadId = mazzyMember.id;
@@ -204,16 +232,16 @@ export default function App() {
 
             // Clean up Team 2 (Team Lindsay)
             if (currentTeamId === 'team_lindsay') {
-              if (cleanedData.teamTitle === 'Team Lindsay Capacity Tracker' || !cleanedData.teamTitle) {
-                cleanedData.teamTitle = 'Team Lindsay';
+              cleanedData.teamTitle = 'Team Lindsay';
+              const lindsayMember = cleanedData.staff.find(s => s.name.toLowerCase() === 'lindsay');
+              if (lindsayMember && cleanedData.teamLeadId !== lindsayMember.id) {
+                cleanedData.teamLeadId = lindsayMember.id;
               }
             }
 
             // Clean up Team 3 (Team Kimyatta)
-            if (currentTeamId === 'team_kimyatta' || currentTeamId === 'team_marcus') {
-              if (cleanedData.teamTitle === 'Team Marcus Capacity Tracker' || cleanedData.teamTitle === 'Team Kimyatta Capacity Tracker' || !cleanedData.teamTitle) {
-                cleanedData.teamTitle = 'Team Kimyatta';
-              }
+            if (currentTeamId === 'team_kimyatta') {
+              cleanedData.teamTitle = 'Team Kimyatta';
               const kimyattaMember = cleanedData.staff.find(s => s.name.toLowerCase() === 'kimyatta') || cleanedData.staff[0];
               if (kimyattaMember) {
                 cleanedData.teamLeadId = kimyattaMember.id;
@@ -230,6 +258,7 @@ export default function App() {
             const synchronized = syncRollingWeeksAndAllocations(cleanedData);
             lastSavedJsonRef.current = JSON.stringify(synchronized);
             setAppData(synchronized);
+            isRemoteLoadedRef.current = true;
           }
         } else {
           // Document does not exist yet; seed it with current team default data
@@ -239,6 +268,7 @@ export default function App() {
             console.error('Error seeding initial team Firestore doc:', err);
           });
           setAppData(initialData);
+          isRemoteLoadedRef.current = true;
         }
         setCloudStatus('connected');
         setIsInitialLoad(false);
@@ -255,33 +285,35 @@ export default function App() {
 
   // 3. Save active team changes to Firestore and localStorage
   useEffect(() => {
+    if (!isRemoteLoadedRef.current || isInitialLoad) {
+      return;
+    }
+
     // Sync to team-specific localStorage
     const currentJson = JSON.stringify(appData);
     try {
-      localStorage.setItem(`g5_team_${currentTeamId}`, currentJson);
-      localStorage.setItem('g5_active_team_id', currentTeamId);
+      localStorage.setItem(`tracker_team_${currentTeamId}`, currentJson);
+      localStorage.setItem('tracker_active_team_id', currentTeamId);
     } catch (e) {
       console.error('Failed to persist team to localStorage', e);
     }
 
-    if (!isInitialLoad) {
-      if (currentJson === lastSavedJsonRef.current) {
-        return;
-      }
-      setCloudStatus('syncing');
-      const docId = getTeamDocId(currentTeamId);
-      const docRef = doc(db, FIRESTORE_COLLECTION, docId);
-      lastSavedJsonRef.current = currentJson;
-      
-      setDoc(docRef, appData, { merge: true })
-        .then(() => {
-          setCloudStatus('connected');
-        })
-        .catch((err) => {
-          console.error('Failed to update Firestore team document:', err);
-          setCloudStatus('error');
-        });
+    if (currentJson === lastSavedJsonRef.current) {
+      return;
     }
+    setCloudStatus('syncing');
+    const docId = getTeamDocId(currentTeamId);
+    const docRef = doc(db, FIRESTORE_COLLECTION, docId);
+    lastSavedJsonRef.current = currentJson;
+    
+    setDoc(docRef, appData, { merge: true })
+      .then(() => {
+        setCloudStatus('connected');
+      })
+      .catch((err) => {
+        console.error('Failed to update Firestore team document:', err);
+        setCloudStatus('error');
+      });
   }, [appData, currentTeamId, isInitialLoad]);
 
   // Automatically roll forward when a new week arrives or tab is focused
@@ -1006,72 +1038,27 @@ export default function App() {
   // Team Switcher Actions
   const handleSelectTeam = (teamId: string) => {
     if (teamId === currentTeamId) return;
+    isRemoteLoadedRef.current = false;
+    setIsInitialLoad(true);
     setCurrentTeamId(teamId);
     try {
-      localStorage.setItem('g5_active_team_id', teamId);
-      const cached = localStorage.getItem(`g5_team_${teamId}`);
+      localStorage.setItem('tracker_active_team_id', teamId);
+      const url = new URL(window.location.href);
+      url.searchParams.set('team', teamId);
+      window.history.replaceState({}, '', url.toString());
+
+      const cached = localStorage.getItem(`tracker_team_${teamId}`);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed && Array.isArray(parsed.staff) && parsed.staff.length > 0) {
-          setAppData(syncRollingWeeksAndAllocations(parsed));
+          const synchronized = syncRollingWeeksAndAllocations(parsed);
+          lastSavedJsonRef.current = JSON.stringify(synchronized);
+          setAppData(synchronized);
         }
-      } else {
-        setAppData(syncRollingWeeksAndAllocations(getDefaultTeamData(teamId)));
       }
     } catch (e) {}
     const target = teamsList.find(t => t.id === teamId);
     showToast(`Switched to ${target?.name || 'Team'}`);
-  };
-
-  const handleCreateTeam = (name: string, leadName: string) => {
-    const newTeamId = `team_${Date.now()}`;
-    const newSummary: TeamSummary = {
-      id: newTeamId,
-      name: name,
-      leadName: leadName,
-    };
-    const updatedTeams = [...teamsList, newSummary];
-    setTeamsList(updatedTeams);
-
-    // Initial team appData
-    const initialWeeks = getRolling2Weeks();
-    const [w1, w2] = initialWeeks;
-    const leadId = 'staff_1';
-    const newTeamData: AppData = {
-      teamTitle: name.toLowerCase().includes('tracker') ? name : `${name} Capacity Tracker`,
-      teamLeadId: leadId,
-      staff: [
-        { id: leadId, name: leadName },
-      ],
-      weeks: initialWeeks,
-      allocations: {
-        [`${leadId}_${w1.id}`]: [
-          { project: 'Team Lead & Management Sync', percent: 35, changed: false, endDateType: 'ongoing' },
-          { project: 'Key Project Deliverables', percent: 65, changed: false, endDateType: 'ongoing' },
-        ],
-        [`${leadId}_${w2.id}`]: [
-          { project: 'Team Lead & Management Sync', percent: 35, changed: false, endDateType: 'ongoing' },
-          { project: 'Key Project Deliverables', percent: 65, changed: false, endDateType: 'ongoing' },
-        ],
-      },
-    };
-
-    // Save to Firestore registry and new team doc
-    const regRef = doc(db, FIRESTORE_COLLECTION, 'teams_registry');
-    setDoc(regRef, { teams: updatedTeams }).catch(console.error);
-
-    const teamDocRef = doc(db, FIRESTORE_COLLECTION, `team_${newTeamId}`);
-    setDoc(teamDocRef, newTeamData).catch(console.error);
-
-    setCurrentTeamId(newTeamId);
-    setAppData(newTeamData);
-    try {
-      localStorage.setItem('g5_teams_list_v1', JSON.stringify(updatedTeams));
-      localStorage.setItem('g5_active_team_id', newTeamId);
-      localStorage.setItem(`g5_team_${newTeamId}`, JSON.stringify(newTeamData));
-    } catch (e) {}
-
-    showToast(`Created ${name}`);
   };
 
   const handleUpdateTeam = (teamId: string, updatedName: string, updatedLead: string) => {
@@ -1100,32 +1087,10 @@ export default function App() {
     }
 
     try {
-      localStorage.setItem('g5_teams_list_v1', JSON.stringify(updatedTeams));
+      localStorage.setItem('tracker_teams_list', JSON.stringify(updatedTeams));
     } catch (e) {}
 
     showToast(`Updated ${cleanName}`);
-  };
-
-  const handleDeleteTeam = (teamId: string) => {
-    if (teamsList.length <= 1) {
-      showToast('Cannot delete the only remaining team');
-      return;
-    }
-    const updatedTeams = teamsList.filter(t => t.id !== teamId);
-    setTeamsList(updatedTeams);
-
-    const regRef = doc(db, FIRESTORE_COLLECTION, 'teams_registry');
-    setDoc(regRef, { teams: updatedTeams }).catch(console.error);
-
-    try {
-      localStorage.setItem('g5_teams_list_v1', JSON.stringify(updatedTeams));
-    } catch (e) {}
-
-    if (teamId === currentTeamId) {
-      const nextTeam = updatedTeams[0];
-      handleSelectTeam(nextTeam.id);
-    }
-    showToast('Team removed');
   };
 
   const currentModalStaff = appData.staff.find(s => s.id === modalStaffId);
@@ -1150,9 +1115,7 @@ export default function App() {
                 teams={teamsList}
                 currentTeamId={currentTeamId}
                 onSelectTeam={handleSelectTeam}
-                onCreateTeam={handleCreateTeam}
                 onUpdateTeam={handleUpdateTeam}
-                onDeleteTeam={handleDeleteTeam}
                 activeTeamTitle={appData.teamTitle}
                 activeLeadName={leadMember?.name || 'Mazzy'}
               />
@@ -1439,12 +1402,12 @@ export default function App() {
                                         <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
                                       </button>
                                       {/* Rich Tooltip Popover */}
-                                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover/zap:flex flex-col z-50 bg-slate-900 text-white text-[11px] py-2 px-3 rounded-xl shadow-xl pointer-events-none border border-slate-700 min-w-[190px] text-left">
-                                        <div className="flex items-center gap-1.5 text-amber-400 font-bold border-b border-slate-700 pb-1 mb-1">
-                                          <Zap className="w-3 h-3 fill-amber-400 shrink-0" />
+                                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover/zap:flex flex-col z-50 bg-slate-900 text-white text-[11px] py-2.5 px-3.5 rounded-xl shadow-xl pointer-events-none border border-slate-700 min-w-[240px] max-w-xs text-left">
+                                        <div className="flex items-center gap-1.5 text-amber-400 font-bold border-b border-slate-700 pb-1.5 mb-1.5">
+                                          <Zap className="w-3.5 h-3.5 fill-amber-400 shrink-0" />
                                           <span>Changed Projects</span>
                                         </div>
-                                        <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                        <div className="space-y-2 max-h-48 overflow-y-auto">
                                           {changedItems.map((cp, idx) => {
                                             let endBadge = '';
                                             if (cp.endDateType === 'ongoing') endBadge = 'Ongoing';
@@ -1452,16 +1415,16 @@ export default function App() {
                                             else if (cp.endDate) endBadge = cp.endDate;
 
                                             return (
-                                              <div key={idx} className="flex items-center justify-between gap-2 text-slate-200">
-                                                <div className="flex flex-col truncate max-w-[140px]">
-                                                  <span className="truncate font-medium">{cp.project}</span>
+                                              <div key={idx} className="flex items-start justify-between gap-3 text-slate-200">
+                                                <div className="flex flex-col min-w-0 flex-1">
+                                                  <span className="font-semibold text-white leading-tight break-words">{cp.project}</span>
                                                   {endBadge && (
-                                                    <span className="text-[9px] text-amber-300/80 font-normal">
+                                                    <span className="text-[10px] text-amber-300 font-normal mt-0.5 whitespace-nowrap">
                                                       {cp.endDateType === 'date' || !cp.endDateType ? `End: ${endBadge}` : endBadge}
                                                     </span>
                                                   )}
                                                 </div>
-                                                <span className="font-bold text-amber-300 shrink-0">{cp.percent}%</span>
+                                                <span className="font-bold text-amber-300 shrink-0 text-xs">{cp.percent}%</span>
                                               </div>
                                             );
                                           })}
@@ -1620,7 +1583,7 @@ export default function App() {
             if (e.target === e.currentTarget) handleSaveAllocations('Allocations auto-saved');
           }}
         >
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-5xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
             {/* Modal Header */}
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-3.5">
@@ -1762,7 +1725,7 @@ export default function App() {
                             <select
                               value={row.endDateType || 'date'}
                               onChange={e => handleRowChange(idx, 'endDateType', e.target.value)}
-                              className="px-2.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 shadow-2xs shrink-0 cursor-pointer"
+                              className="px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-500 shadow-2xs shrink-0 cursor-pointer"
                               title="Project End Date type"
                             >
                               <option value="date">Date</option>
@@ -1771,7 +1734,7 @@ export default function App() {
                             </select>
 
                             {(!row.endDateType || row.endDateType === 'date') && (
-                              <div className="relative flex-1 min-w-[145px]">
+                              <div className="relative flex-1 min-w-[155px]">
                                 <input
                                   type="date"
                                   value={row.endDate || ''}
@@ -1786,7 +1749,7 @@ export default function App() {
                                       (e.currentTarget as any).showPicker?.();
                                     } catch {}
                                   }}
-                                  className="w-full px-2.5 py-1.5 text-xs font-semibold text-slate-800 bg-white border border-slate-200 hover:border-slate-300 focus:border-blue-500 rounded-xl outline-none focus:ring-2 focus:ring-blue-100 shadow-2xs cursor-pointer tracking-tight"
+                                  className="w-full px-2.5 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-200 hover:border-slate-300 focus:border-blue-500 rounded-xl outline-none focus:ring-2 focus:ring-blue-100 shadow-2xs cursor-pointer tracking-normal"
                                   title="Click anywhere to open calendar"
                                 />
                               </div>
@@ -2148,23 +2111,11 @@ export default function App() {
               </div>
             </div>
 
-            <div className="p-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => {
-                  if (window.confirm(`Reset this team and allocations to default template?`)) {
-                    setAppData(syncRollingWeeksAndAllocations(getDefaultTeamData(currentTeamId)));
-                    showToast('Reset to default team members');
-                  }
-                }}
-                className="px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-200/60 rounded-xl transition-colors cursor-pointer"
-              >
-                Reset to Default Team
-              </button>
+            <div className="p-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end">
               <button
                 type="button"
                 onClick={() => setManageTeamModalOpen(false)}
-                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl cursor-pointer"
+                className="px-6 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl cursor-pointer transition-colors shadow-xs"
               >
                 Done
               </button>

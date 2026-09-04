@@ -8,9 +8,9 @@ export interface TeamSummary {
 }
 
 export const DEFAULT_TEAMS_LIST: TeamSummary[] = [
-  { id: 'theglobal5', name: 'Team Mazzy', leadName: 'Mazzy' },
-  { id: 'team_lindsay', name: 'Team Lindsay', leadName: 'Lindsay' },
+  { id: 'team_mazzy', name: 'Team Mazzy', leadName: 'Mazzy' },
   { id: 'team_kimyatta', name: 'Team Kimyatta', leadName: 'Kimyatta' },
+  { id: 'team_lindsay', name: 'Team Lindsay', leadName: 'Lindsay' },
 ];
 
 export const getDefaultTeamData = (teamId: string): AppData => {
@@ -25,9 +25,9 @@ export const getDefaultTeamData = (teamId: string): AppData => {
         { id: 'staff_lindsay_6', name: 'Ben' },
         { id: 'staff_lindsay_5', name: 'Laura' },
         { id: 'staff_lindsay_1', name: 'Lindsay' },
-        { id: 'staff_lindsay_2', name: 'Mary' },
+        { id: 'staff_lindsay_3', name: 'Michael' },
+        { id: 'staff_lindsay_2', name: 'Scott' },
         { id: 'staff_lindsay_4', name: 'Sherien' },
-        { id: 'staff_lindsay_3', name: 'Thomas' },
       ],
       weeks: initialWeeks,
       allocations: {
@@ -103,7 +103,7 @@ export const getDefaultTeamData = (teamId: string): AppData => {
     };
   }
 
-  if (teamId === 'team_kimyatta' || teamId === 'team_marcus') {
+  if (teamId === 'team_kimyatta') {
     return {
       teamTitle: 'Team Kimyatta',
       teamLeadId: 'staff_kimyatta_1',
@@ -118,70 +118,74 @@ export const getDefaultTeamData = (teamId: string): AppData => {
       weeks: initialWeeks,
       allocations: {
         [`staff_kimyatta_1_${w1.id}`]: [
-          { project: 'Operations Lead & Planning', percent: 35, changed: false, endDateType: 'ongoing' },
+          { project: 'Operations Lead & Planning', percent: 35, changed: false, endDateType: 'ongoing', endDate: '' },
           { project: 'Global Cohort Schedule Rollout', percent: 45, changed: false, endDateType: 'date', endDate: '2026-09-28' },
-          { project: 'Resource Balancing', percent: 20, changed: false, endDateType: 'secondary_tasks' },
+          { project: 'Resource Balancing', percent: 20, changed: false, endDateType: 'secondary_tasks', endDate: '' },
         ],
         [`staff_kimyatta_1_${w2.id}`]: [
-          { project: 'Operations Lead & Planning', percent: 35, changed: false, endDateType: 'ongoing' },
+          { project: 'Operations Lead & Planning', percent: 35, changed: false, endDateType: 'ongoing', endDate: '' },
           { project: 'Global Cohort Schedule Rollout', percent: 45, changed: false, endDateType: 'date', endDate: '2026-09-28' },
-          { project: 'Resource Balancing', percent: 20, changed: false, endDateType: 'secondary_tasks' },
+          { project: 'Resource Balancing', percent: 20, changed: false, endDateType: 'secondary_tasks', endDate: '' },
         ],
         [`staff_kimyatta_2_${w1.id}`]: [
-          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
+          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing', endDate: '' },
           { project: 'Academic Integrity Automation', percent: 65, changed: false, endDateType: 'date', endDate: '2026-10-02' },
-          { project: 'Data Pipeline Support', percent: 20, changed: false, endDateType: 'secondary_tasks' },
+          { project: 'Data Pipeline Support', percent: 20, changed: false, endDateType: 'secondary_tasks', endDate: '' },
         ],
         [`staff_kimyatta_2_${w2.id}`]: [
-          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
+          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing', endDate: '' },
           { project: 'Academic Integrity Automation', percent: 65, changed: false, endDateType: 'date', endDate: '2026-10-02' },
-          { project: 'Data Pipeline Support', percent: 20, changed: false, endDateType: 'secondary_tasks' },
+          { project: 'Data Pipeline Support', percent: 20, changed: false, endDateType: 'secondary_tasks', endDate: '' },
         ],
         [`staff_kimyatta_3_${w1.id}`]: [
-          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
+          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing', endDate: '' },
           { project: 'Student Success Portal UI', percent: 60, changed: false, endDateType: 'date', endDate: '2026-09-24' },
-          { project: 'User Interviews & Feedback', percent: 25, changed: false, endDateType: 'ongoing' },
+          { project: 'User Interviews & Feedback', percent: 25, changed: false, endDateType: 'ongoing', endDate: '' },
         ],
         [`staff_kimyatta_3_${w2.id}`]: [
-          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
+          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing', endDate: '' },
           { project: 'Student Success Portal UI', percent: 60, changed: false, endDateType: 'date', endDate: '2026-09-24' },
-          { project: 'User Interviews & Feedback', percent: 25, changed: false, endDateType: 'ongoing' },
+          { project: 'User Interviews & Feedback', percent: 25, changed: false, endDateType: 'ongoing', endDate: '' },
         ],
         [`staff_kimyatta_4_${w1.id}`]: [
-          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
-          { project: 'Partner University Data Sync', percent: 55, changed: false, endDateType: 'date', endDate: '2026-09-18' },
-          { project: 'API Gateway Maintenance', percent: 30, changed: false, endDateType: 'ongoing' },
+          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing', endDate: '' },
+          { project: 'Cohort Analytics Dashboard', percent: 70, changed: false, endDateType: 'date', endDate: '2026-09-30' },
+          { project: 'Weekly Metric Reporting', percent: 15, changed: false, endDateType: 'secondary_tasks', endDate: '' },
         ],
         [`staff_kimyatta_4_${w2.id}`]: [
-          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
-          { project: 'Partner University Data Sync', percent: 55, changed: false, endDateType: 'date', endDate: '2026-09-18' },
-          { project: 'API Gateway Maintenance', percent: 30, changed: false, endDateType: 'ongoing' },
+          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing', endDate: '' },
+          { project: 'Cohort Analytics Dashboard', percent: 70, changed: false, endDateType: 'date', endDate: '2026-09-30' },
+          { project: 'Weekly Metric Reporting', percent: 15, changed: false, endDateType: 'secondary_tasks', endDate: '' },
         ],
         [`staff_kimyatta_5_${w1.id}`]: [
-          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
-          { project: 'Live Webinar Streaming Infrastructure', percent: 50, changed: false, endDateType: 'date', endDate: '2026-10-15' },
-          { project: 'Technical Host Support', percent: 35, changed: false, endDateType: 'ongoing' },
+          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing', endDate: '' },
+          { project: 'MO-AIPB', percent: 50, changed: false, endDateType: 'date', endDate: '2026-11-12' },
+          { project: 'MPE-AIS', percent: 20, changed: false, endDateType: 'date', endDate: '2027-02-28' },
+          { project: 'UCH-AIFIN/UCH-AIF', percent: 10, changed: false, endDateType: 'date', endDate: '2026-11-01' },
         ],
         [`staff_kimyatta_5_${w2.id}`]: [
-          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
-          { project: 'Live Webinar Streaming Infrastructure', percent: 50, changed: false, endDateType: 'date', endDate: '2026-10-15' },
-          { project: 'Technical Host Support', percent: 35, changed: false, endDateType: 'ongoing' },
+          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing', endDate: '' },
+          { project: 'MO-AIPB', percent: 50, changed: false, endDateType: 'date', endDate: '2026-11-12' },
+          { project: 'MPE-AIS', percent: 20, changed: false, endDateType: 'date', endDate: '2027-02-28' },
+          { project: 'UCH-AIFIN/UCH-AIF', percent: 10, changed: false, endDateType: 'date', endDate: '2026-11-01' },
         ],
         [`staff_kimyatta_6_${w1.id}`]: [
-          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
-          { project: 'Cohort Analytics Dashboard', percent: 70, changed: false, endDateType: 'date', endDate: '2026-09-30' },
-          { project: 'Weekly Metric Reporting', percent: 15, changed: false, endDateType: 'secondary_tasks' },
+          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing', endDate: '' },
+          { project: 'People Management', percent: 50, changed: false, endDateType: 'ongoing', endDate: '2026-09-30' },
+          { project: 'UCH-AI', percent: 25, changed: false, endDateType: 'date', endDate: '2026-11-26' },
+          { project: 'CSM Build Pilot', percent: 10, changed: false, endDateType: 'secondary_tasks', endDate: '' },
         ],
         [`staff_kimyatta_6_${w2.id}`]: [
-          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
-          { project: 'Cohort Analytics Dashboard', percent: 70, changed: false, endDateType: 'date', endDate: '2026-09-30' },
-          { project: 'Weekly Metric Reporting', percent: 15, changed: false, endDateType: 'secondary_tasks' },
+          { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing', endDate: '' },
+          { project: 'People Management', percent: 50, changed: false, endDateType: 'ongoing', endDate: '2026-09-30' },
+          { project: 'UCH-AI', percent: 25, changed: false, endDateType: 'date', endDate: '2026-11-26' },
+          { project: 'CSM Build Pilot', percent: 10, changed: false, endDateType: 'secondary_tasks', endDate: '' },
         ],
       },
     };
   }
 
-  // Default: Team Mazzy (theglobal5 / team_mazzy)
+  // Default: Team Mazzy (team_mazzy)
   return {
     teamTitle: 'Team Mazzy',
     teamLeadId: 'staff_3',

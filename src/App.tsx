@@ -414,6 +414,7 @@ export default function App() {
     isNew?: boolean;
     initialPercent?: number;
     initialChanged?: boolean;
+    userToggledChanged?: boolean;
   }
 
   const [allocationModalOpen, setAllocationModalOpen] = useState(false);
@@ -626,6 +627,7 @@ export default function App() {
       isNew: false,
       initialPercent: item.percent,
       initialChanged: item.changed || false,
+      userToggledChanged: false,
       endDateType: item.endDateType || 'date',
       endDate: item.endDate || ''
     })));
@@ -648,6 +650,7 @@ export default function App() {
         isNew: true,
         initialPercent: undefined,
         initialChanged: false,
+        userToggledChanged: false,
         changed: false, 
         endDateType: 'date', 
         endDate: '' 
@@ -679,12 +682,10 @@ export default function App() {
       } else {
         const newPct = Math.max(0, Number(value) || 0);
         let changed = row.changed;
-        if (!row.isNew) {
-          // Previously added projects: only mark changed if the percent differs from original saved value
-          if (row.initialPercent !== undefined) {
-            changed = newPct !== row.initialPercent ? true : (row.initialChanged || false);
-          } else {
-            changed = newPct !== row.percent ? true : (row.initialChanged || false);
+        // Only auto-flag changed if the user hasn't explicitly toggled this row
+        if (!row.userToggledChanged) {
+          if (!row.isNew && row.initialPercent !== undefined) {
+            changed = newPct !== row.initialPercent;
           }
         }
         next[index] = { 
@@ -700,9 +701,22 @@ export default function App() {
   const handleToggleRowChanged = (index: number) => {
     setModalRows(prev => {
       const next = [...prev];
-      next[index] = { ...next[index], changed: !next[index].changed };
+      const nextChanged = !next[index].changed;
+      next[index] = { 
+        ...next[index], 
+        changed: nextChanged,
+        userToggledChanged: true
+      };
       return next;
     });
+  };
+
+  const handleClearAllModalChanged = () => {
+    setModalRows(prev => prev.map(r => ({
+      ...r,
+      changed: false,
+      userToggledChanged: true
+    })));
   };
 
   const handleDragStart = (e: React.DragEvent, index: number) => {
@@ -880,14 +894,20 @@ export default function App() {
         const existing = oldList.find(p => p.project.toLowerCase() === projName.toLowerCase());
 
         let isChanged = false;
-        if (r.isNew) {
-          // Newly added project row in this modal session: do not mark changed automatically
-          isChanged = r.changed || false;
+        if (r.userToggledChanged) {
+          // Explicit user toggle (ON or OFF) strictly overrides everything
+          isChanged = !!r.changed;
+        } else if (r.isNew) {
+          // Newly added project row in this modal session: keep manual state
+          isChanged = !!r.changed;
+        } else if (r.initialPercent !== undefined) {
+          // Auto-mark changed only if the percentage changed from initial loaded value
+          isChanged = newPct !== r.initialPercent;
         } else if (existing) {
-          // Previously added project: mark changed if percentage was modified or manually marked
-          isChanged = r.changed || (existing.percent !== newPct);
+          // Fallback to existing percent difference if initialPercent missing
+          isChanged = existing.percent !== newPct;
         } else {
-          isChanged = r.changed || false;
+          isChanged = !!r.changed;
         }
 
         return { 
@@ -912,6 +932,22 @@ export default function App() {
     const message = typeof customToastMsg === 'string' ? customToastMsg : 'Allocations saved successfully';
     showToast(message);
     handleCloseAllocationModal();
+  };
+
+  // Quick 1-click action to clear "Changed" status for a member and week directly from dashboard
+  const handleClearChangedForMemberWeek = (staffId: string, weekId: string) => {
+    const key = `${staffId}_${weekId}`;
+    const list = appData.allocations[key] || [];
+    const updatedList = list.map(item => ({ ...item, changed: false }));
+    const nextAppData: AppData = {
+      ...appData,
+      allocations: {
+        ...appData.allocations,
+        [key]: updatedList,
+      },
+    };
+    persistAppData(nextAppData);
+    showToast('Cleared "Changed" status');
   };
 
   // Staff Notes Update Handler
@@ -1415,10 +1451,23 @@ export default function App() {
                                         <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
                                       </button>
                                       {/* Rich Tooltip Popover */}
-                                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover/zap:flex flex-col z-50 bg-slate-900 text-white text-[11px] py-2.5 px-3.5 rounded-xl shadow-xl pointer-events-none border border-slate-700 min-w-[240px] max-w-xs text-left">
-                                        <div className="flex items-center gap-1.5 text-amber-400 font-bold border-b border-slate-700 pb-1.5 mb-1.5">
-                                          <Zap className="w-3.5 h-3.5 fill-amber-400 shrink-0" />
-                                          <span>Changed Projects</span>
+                                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover/zap:flex flex-col z-50 bg-slate-900 text-white text-[11px] py-2.5 px-3.5 rounded-xl shadow-xl border border-slate-700 min-w-[250px] max-w-xs text-left">
+                                        <div className="flex items-center justify-between gap-2 border-b border-slate-700 pb-1.5 mb-1.5">
+                                          <div className="flex items-center gap-1.5 text-amber-400 font-bold">
+                                            <Zap className="w-3.5 h-3.5 fill-amber-400 shrink-0" />
+                                            <span>Changed Projects</span>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleClearChangedForMemberWeek(staff.id, w.id);
+                                            }}
+                                            className="text-[10px] text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-600 px-2 py-0.5 rounded cursor-pointer transition-colors font-medium"
+                                            title="Clear 'Changed' tag for all projects in this week"
+                                          >
+                                            Turn Off
+                                          </button>
                                         </div>
                                         <div className="space-y-2 max-h-48 overflow-y-auto">
                                           {changedItems.map((cp, idx) => {
@@ -1670,9 +1719,19 @@ export default function App() {
             {/* Scrollable Editable Project Rows */}
             <div className="px-5 space-y-3 max-h-[50vh] overflow-y-auto custom-scrollbar pb-2 pt-2 sm:pt-0">
               {modalRows.some(r => r.changed) && (
-                <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl font-semibold mb-1">
-                  <Zap className="w-3.5 h-3.5 fill-amber-500 text-amber-500 shrink-0" />
-                  <span>{modalRows.filter(r => r.changed).length} project(s) have modified percentage allocations</span>
+                <div className="flex items-center justify-between gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 px-3.5 py-2 rounded-xl font-semibold mb-1">
+                  <div className="flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 fill-amber-500 text-amber-500 shrink-0" />
+                    <span>{modalRows.filter(r => r.changed).length} project(s) marked as changed</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleClearAllModalChanged}
+                    className="text-[11px] font-bold text-amber-900 bg-amber-200/90 hover:bg-amber-300 border border-amber-300 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shrink-0 shadow-2xs"
+                    title="Turn off 'Changed' status for all projects in this week"
+                  >
+                    Clear All Changed
+                  </button>
                 </div>
               )}
 
@@ -1793,18 +1852,19 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={() => handleToggleRowChanged(idx)}
-                                className="px-2 py-1 bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 rounded-lg text-[11px] font-bold flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs transition-colors whitespace-nowrap"
-                                title="Percentage changed for this project (click to toggle)"
+                                className="px-2 py-1 bg-amber-100 hover:bg-rose-100 border border-amber-300 hover:border-rose-300 text-amber-900 hover:text-rose-900 rounded-lg text-[11px] font-bold flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs transition-colors whitespace-nowrap group/cbtn"
+                                title="Click to turn OFF 'Changed' status"
                               >
-                                <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500 shrink-0" />
-                                <span>Changed</span>
+                                <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500 group-hover/cbtn:text-rose-600 group-hover/cbtn:fill-rose-500 shrink-0" />
+                                <span className="group-hover/cbtn:hidden">Changed</span>
+                                <span className="hidden group-hover/cbtn:inline text-rose-700">Turn Off ✕</span>
                               </button>
                             ) : (
                               <button
                                 type="button"
                                 onClick={() => handleToggleRowChanged(idx)}
-                                className="px-1.5 py-1 text-slate-400 hover:text-amber-600 hover:bg-amber-50 border border-transparent hover:border-amber-200 rounded-lg text-[11px] font-semibold shrink-0 cursor-pointer opacity-70 hover:opacity-100 transition-all flex items-center gap-1"
-                                title="Mark project as changed"
+                                className="px-1.5 py-1 text-slate-400 hover:text-amber-700 hover:bg-amber-50 border border-transparent hover:border-amber-200 rounded-lg text-[11px] font-semibold shrink-0 cursor-pointer opacity-70 hover:opacity-100 transition-all flex items-center gap-1"
+                                title="Click to turn ON 'Changed' status"
                               >
                                 <Zap className="w-3.5 h-3.5" />
                               </button>

@@ -28,8 +28,7 @@ import {
   filterActiveAllocations,
   parseDateIso,
   formatDateIso,
-  formatWeekLabel,
-  getMondayOfWeek
+  formatWeekLabel
 } from './utils/dateUtils';
 import { DEFAULT_TEAMS_LIST, getDefaultTeamData } from './data/defaultTeams';
 import { TeamSwitcher } from './components/TeamSwitcher';
@@ -446,13 +445,6 @@ export default function App() {
   const active2Weeks = useMemo(() => {
     const list = appData.weeks.filter(w => !w.archived);
     return list.length > 0 ? list.slice(0, 2) : appData.weeks.slice(0, 2);
-  }, [appData.weeks]);
-
-  // Check if viewing an earlier historical schedule horizon
-  const isHistoricalHorizon = useMemo(() => {
-    if (!appData.weeks || appData.weeks.length === 0) return false;
-    const currentMonIso = getMondayOfWeek(new Date()).toISOString().split('T')[0];
-    return appData.weeks[0]?.startDate !== currentMonIso;
   }, [appData.weeks]);
 
   // Lead member
@@ -1281,33 +1273,6 @@ export default function App() {
             )}
           </div>
         </div>
-
-        {/* Earlier Horizon Notification Banner */}
-        {isHistoricalHorizon && (
-          <div className="mb-6 p-4 bg-amber-50/90 border border-amber-300 rounded-xl flex flex-wrap items-center justify-between gap-3 shadow-2xs">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center shrink-0 border border-amber-200">
-                <RotateCcw className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="text-xs font-bold text-amber-950">
-                  Viewing Schedule Horizon: {appData.weeks[0]?.label} &amp; {appData.weeks[1]?.label}
-                </p>
-                <p className="text-[11px] text-amber-800">
-                  Displaying saved allocations entered for this period. You can make edits or return to the current week anytime.
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => handleRevertToDate(new Date().toISOString().split('T')[0])}
-              className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white text-xs font-bold rounded-lg shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Return to Current Week</span>
-            </button>
-          </div>
-        )}
 
         {/* Main 12-Column Layout */}
         <div className="grid grid-cols-12 gap-6">

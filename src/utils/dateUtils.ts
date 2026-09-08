@@ -85,8 +85,20 @@ export function filterActiveAllocations(items: AllocationItem[], weekStartDate: 
  * previous week allocations over when a new week arrives so no manual re-entry is needed.
  * Every new week added is an exact duplicate of the previous week.
  */
-export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate: Date = new Date()): AppData {
-  const rollingWeeks = getRolling2Weeks(baseDate);
+export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate?: Date): AppData {
+  let rollingWeeks: WeekHorizon[];
+  if (baseDate) {
+    rollingWeeks = getRolling2Weeks(baseDate);
+  } else if (
+    prevData.weeks &&
+    prevData.weeks.length === 2 &&
+    prevData.weeks[0]?.id &&
+    prevData.weeks[1]?.id
+  ) {
+    rollingWeeks = prevData.weeks;
+  } else {
+    rollingWeeks = getRolling2Weeks(new Date());
+  }
   const [currentWeek, nextWeek] = rollingWeeks;
 
   const currentWeeks = prevData.weeks || [];

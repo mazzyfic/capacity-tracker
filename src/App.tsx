@@ -28,7 +28,8 @@ import {
   filterActiveAllocations,
   parseDateIso,
   formatDateIso,
-  formatWeekLabel
+  formatWeekLabel,
+  getMondayOfWeek
 } from './utils/dateUtils';
 import { DEFAULT_TEAMS_LIST, getDefaultTeamData } from './data/defaultTeams';
 import { TeamSwitcher } from './components/TeamSwitcher';
@@ -139,34 +140,47 @@ export default function App() {
 
     let sourceData = customData;
     if (!sourceData) {
-      // If no customData passed, check if there's a stored baseline for Sep 3 in theglobal5_state or capacity_snapshots
-      if (currentTeamId === 'team_mazzy' && targetDateIso <= '2026-09-03') {
-        try {
-          const global5Snap = await getDoc(doc(db, FIRESTORE_COLLECTION, 'theglobal5_state'));
-          if (global5Snap.exists()) {
-            sourceData = global5Snap.data() as AppData;
-          }
-        } catch (e) {
-          console.error('Failed to get theglobal5_state', e);
+      // Always get the latest data for THIS specific team from Firestore first
+      try {
+        const teamDocSnap = await getDoc(doc(db, FIRESTORE_COLLECTION, docId));
+        if (teamDocSnap.exists()) {
+          sourceData = teamDocSnap.data() as AppData;
         }
+      } catch (e) {
+        console.error('Failed to get team doc from Firestore', e);
       }
       if (!sourceData) {
         sourceData = { ...appData };
       }
     }
 
-    // Clean and normalize team info
-    const cleaned: AppData = { ...sourceData };
+    // Clean and normalize team info while keeping all existing allocations intact
+    const cleaned: AppData = {
+      ...sourceData,
+      allocations: {
+        ...(appData.allocations || {}),
+        ...(sourceData.allocations || {}),
+      },
+    };
+
     if (currentTeamId === 'team_mazzy') {
       cleaned.teamTitle = 'Team Mazzy';
       const mazzyMember = cleaned.staff.find(s => s.name.toLowerCase() === 'mazzy');
       if (mazzyMember) cleaned.teamLeadId = mazzyMember.id;
+    } else if (currentTeamId === 'team_lindsay') {
+      cleaned.teamTitle = 'Team Lindsay';
+      const lindsayMember = cleaned.staff.find(s => s.name.toLowerCase() === 'lindsay');
+      if (lindsayMember) cleaned.teamLeadId = lindsayMember.id;
+    } else if (currentTeamId === 'team_kimyatta') {
+      cleaned.teamTitle = 'Team Kimyatta';
+      const kimyattaMember = cleaned.staff.find(s => s.name.toLowerCase() === 'kimyatta');
+      if (kimyattaMember) cleaned.teamLeadId = kimyattaMember.id;
     }
 
     const synchronized = syncRollingWeeksAndAllocations(cleaned, targetBaseDate);
     const jsonStr = JSON.stringify(synchronized);
 
-    // Save to Firestore without merge so it completely overwrites to older data!
+    // Save the newly reverted horizon to Firestore and local storage
     await setDoc(doc(db, FIRESTORE_COLLECTION, docId), synchronized);
     localStorage.setItem(`tracker_team_${currentTeamId}`, jsonStr);
 
@@ -426,6 +440,13 @@ export default function App() {
   const active2Weeks = useMemo(() => {
     const list = appData.weeks.filter(w => !w.archived);
     return list.length > 0 ? list.slice(0, 2) : appData.weeks.slice(0, 2);
+  }, [appData.weeks]);
+
+  // Check if viewing an earlier historical schedule horizon
+  const isHistoricalHorizon = useMemo(() => {
+    if (!appData.weeks || appData.weeks.length === 0) return false;
+    const currentMonIso = getMondayOfWeek(new Date()).toISOString().split('T')[0];
+    return appData.weeks[0]?.startDate !== currentMonIso;
   }, [appData.weeks]);
 
   // Lead member
@@ -1254,6 +1275,33 @@ export default function App() {
             )}
           </div>
         </div>
+
+        {/* Earlier Horizon Notification Banner */}
+        {isHistoricalHorizon && (
+          <div className="mb-6 p-4 bg-amber-50/90 border border-amber-300 rounded-xl flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center shrink-0 border border-amber-200">
+                <RotateCcw className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-amber-950">
+                  Viewing Schedule Horizon: {appData.weeks[0]?.label} &amp; {appData.weeks[1]?.label}
+                </p>
+                <p className="text-[11px] text-amber-800">
+                  Displaying saved allocations entered for this period. You can make edits or return to the current week anytime.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleRevertToDate(new Date().toISOString().split('T')[0])}
+              className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white text-xs font-bold rounded-lg shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Return to Current Week</span>
+            </button>
+          </div>
+        )}
 
         {/* Main 12-Column Layout */}
         <div className="grid grid-cols-12 gap-6">

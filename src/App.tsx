@@ -2,10 +2,8 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Chart, registerables } from 'chart.js';
 import { 
   Users, 
-  CalendarPlus, 
   FileSpreadsheet, 
-  Edit2,
-  Edit3, 
+  Edit2, 
   Check, 
   X, 
   Plus, 
@@ -14,7 +12,6 @@ import {
   ExternalLink, 
   Zap, 
   CheckCircle2, 
-  UserCheck, 
   UserPlus, 
   AlertTriangle,
   Cloud,
@@ -23,15 +20,10 @@ import {
   RefreshCw,
   MessageSquare,
   GripVertical,
-  Shield,
   RotateCcw,
-  Crown,
-  Lock,
-  User,
 } from 'lucide-react';
 import { StaffMember, WeekHorizon, AllocationItem, AppData, TeamSummary } from './types';
 import { 
-  getRolling2Weeks, 
   syncRollingWeeksAndAllocations, 
   filterActiveAllocations,
   parseDateIso,
@@ -40,7 +32,6 @@ import {
 } from './utils/dateUtils';
 import { DEFAULT_TEAMS_LIST, getDefaultTeamData } from './data/defaultTeams';
 import { TeamSwitcher } from './components/TeamSwitcher';
-import { AdminPortalModal } from './components/AdminPortalModal';
 import { RevertDateModal } from './components/RevertDateModal';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { db } from './firebase';
@@ -133,61 +124,7 @@ export default function App() {
       });
   }, [currentTeamId]);
 
-  // Admin Account & Portal State
-  const [adminPortalOpen, setAdminPortalOpen] = useState(false);
-  const [adminUser, setAdminUser] = useState<{ email: string; name: string } | null>(() => {
-    try {
-      const stored = localStorage.getItem('tracker_admin_user');
-      if (stored) return JSON.parse(stored);
-    } catch (e) {}
-    // Default pre-authorized super admin session
-    return { email: 'mazlan.hasan@emeritus.org', name: 'Mazlan Hasan' };
-  });
 
-  const handleAdminLogin = (email: string) => {
-    const user = { email, name: email.split('@')[0] };
-    setAdminUser(user);
-    localStorage.setItem('tracker_admin_user', JSON.stringify(user));
-  };
-
-  const handleAdminLogout = () => {
-    setAdminUser(null);
-    localStorage.removeItem('tracker_admin_user');
-  };
-
-  const handleRevertTeamData = async (teamId: string, newData: AppData) => {
-    const docId = getTeamDocId(teamId);
-    const synchronized = syncRollingWeeksAndAllocations(newData);
-    const jsonStr = JSON.stringify(synchronized);
-    
-    // Save to Firestore without merge so it completely overwrites to older data!
-    await setDoc(doc(db, FIRESTORE_COLLECTION, docId), synchronized);
-    localStorage.setItem(`tracker_team_${teamId}`, jsonStr);
-    
-    if (teamId === currentTeamId) {
-      lastSavedJsonRef.current = jsonStr;
-      setAppData(synchronized);
-    }
-  };
-
-  const handleRevertAllTeams = async (teamsData: Record<string, any>) => {
-    for (const [key, val] of Object.entries(teamsData)) {
-      if (key === 'teams_registry') continue;
-      let targetId = key;
-      if (key === 'theglobal5_state') targetId = 'team_mazzy';
-      if (key === 'team_team_kimyatta') targetId = 'team_kimyatta';
-      if (key === 'team_team_lindsay') targetId = 'team_lindsay';
-      if (['team_mazzy', 'team_kimyatta', 'team_lindsay'].includes(targetId)) {
-        const synchronized = syncRollingWeeksAndAllocations(val as AppData);
-        await setDoc(doc(db, FIRESTORE_COLLECTION, targetId), synchronized);
-        localStorage.setItem(`tracker_team_${targetId}`, JSON.stringify(synchronized));
-        if (targetId === currentTeamId) {
-          lastSavedJsonRef.current = JSON.stringify(synchronized);
-          setAppData(synchronized);
-        }
-      }
-    }
-  };
 
   const [revertDateModalOpen, setRevertDateModalOpen] = useState(false);
 
@@ -467,21 +404,11 @@ export default function App() {
   const [draggedRowIndex, setDraggedRowIndex] = useState<number | null>(null);
   const [dragOverRowIndex, setDragOverRowIndex] = useState<number | null>(null);
 
-  // Title Edit State
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [tempTitle, setTempTitle] = useState(appData.teamTitle);
-
   // Manage Team Modal State
   const [manageTeamModalOpen, setManageTeamModalOpen] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
   const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
   const [editingStaffName, setEditingStaffName] = useState('');
-
-  // Add Week Modal State
-  const [addWeekModalOpen, setAddWeekModalOpen] = useState(false);
-  const [newWeekLabel, setNewWeekLabel] = useState('');
-  const [newWeekStart, setNewWeekStart] = useState('');
-  const [newWeekEnd, setNewWeekEnd] = useState('');
 
   // Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -1017,32 +944,6 @@ export default function App() {
     showToast('CSV report exported successfully');
   };
 
-  // Add Week
-  const handleAddWeek = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newWeekLabel.trim()) return;
-
-    const newId = `w_${Date.now()}`;
-    const newWeek: WeekHorizon = {
-      id: newId,
-      label: newWeekLabel.trim(),
-      startDate: newWeekStart || new Date().toISOString().split('T')[0],
-      endDate: newWeekEnd || new Date().toISOString().split('T')[0],
-      archived: false,
-    };
-
-    setAppData(prev => ({
-      ...prev,
-      weeks: [...prev.weeks, newWeek],
-    }));
-
-    setNewWeekLabel('');
-    setNewWeekStart('');
-    setNewWeekEnd('');
-    setAddWeekModalOpen(false);
-    showToast(`Week "${newWeek.label}" added`);
-  };
-
   // Add Staff Member
   const handleAddStaffMember = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1261,36 +1162,6 @@ export default function App() {
 
         <div className="flex items-center gap-2.5">
           <button
-            id="addWeekBtn"
-            type="button"
-            onClick={() => {
-              const now = new Date();
-              const nextMonday = new Date();
-              nextMonday.setDate(now.getDate() + ((1 + 7 - now.getDay()) % 7 || 7));
-              const nextFriday = new Date(nextMonday);
-              nextFriday.setDate(nextMonday.getDate() + 4);
-              
-              const formatLabel = (d1: Date, d2: Date) => {
-                const m1 = d1.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-                const m2 = d2.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-                if (m1 === m2) {
-                  return `${m1} ${d1.getDate()} - ${m1} ${d2.getDate()}`;
-                }
-                return `${m1} ${d1.getDate()} - ${m2} ${d2.getDate()}`;
-              };
-
-              setNewWeekLabel(formatLabel(nextMonday, nextFriday));
-              setNewWeekStart(nextMonday.toISOString().split('T')[0]);
-              setNewWeekEnd(nextFriday.toISOString().split('T')[0]);
-              setAddWeekModalOpen(true);
-            }}
-            className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
-          >
-            <CalendarPlus className="w-3.5 h-3.5 text-slate-600" />
-            <span>+ Add Week</span>
-          </button>
-
-          <button
             id="manageTeamBtn"
             type="button"
             onClick={() => setManageTeamModalOpen(true)}
@@ -1320,21 +1191,6 @@ export default function App() {
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
             <span className="hidden sm:inline">Export CSV</span>
-          </button>
-
-          <button
-            id="adminPortalBtn"
-            type="button"
-            onClick={() => setAdminPortalOpen(true)}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
-              adminUser
-                ? 'bg-indigo-50 hover:bg-indigo-100 border-indigo-200 text-indigo-700'
-                : 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-700'
-            }`}
-            title="Admin Data Revert & Backup Portal"
-          >
-            <Shield className={`w-3.5 h-3.5 ${adminUser ? 'text-indigo-600' : 'text-slate-500'}`} />
-            <span>Admin Portal</span>
           </button>
         </div>
       </header>
@@ -2021,84 +1877,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Add Week Modal */}
-      {addWeekModalOpen && (
-        <div 
-          id="addWeekModal" 
-          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setAddWeekModalOpen(false);
-          }}
-        >
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
-            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
-              <h3 className="text-sm font-bold flex items-center gap-2">
-                <CalendarPlus className="w-4 h-4 text-blue-400" />
-                <span>Add Planning Horizon Week</span>
-              </h3>
-              <button 
-                type="button" 
-                onClick={() => setAddWeekModalOpen(false)} 
-                className="text-slate-400 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddWeek} className="p-5 space-y-3.5">
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1">Week Label</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. August 31 - September 04"
-                  value={newWeekLabel}
-                  onChange={e => setNewWeekLabel(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:outline-blue-500 font-medium shadow-2xs"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2.5">
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">Start Date</label>
-                  <input
-                    type="date"
-                    value={newWeekStart}
-                    onChange={e => setNewWeekStart(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white focus:outline-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 block mb-1">End Date</label>
-                  <input
-                    type="date"
-                    value={newWeekEnd}
-                    onChange={e => setNewWeekEnd(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white focus:outline-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 -mx-5 -mb-5 mt-4">
-                <button
-                  type="button"
-                  onClick={() => setAddWeekModalOpen(false)}
-                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-semibold rounded-xl cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-xs cursor-pointer"
-                >
-                  Create Week
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Manage Team Modal */}
       {manageTeamModalOpen && (
         <div 
@@ -2270,20 +2048,7 @@ export default function App() {
         currentTeamTitle={appData.teamTitle}
         appData={appData}
         onRevertToDate={handleRevertToDate}
-      />
-
-      {/* Admin Portal Modal */}
-      <AdminPortalModal
-        isOpen={adminPortalOpen}
-        onClose={() => setAdminPortalOpen(false)}
-        currentTeamId={currentTeamId}
-        currentTeamTitle={appData.teamTitle}
-        appData={appData}
-        onRevertTeamData={handleRevertTeamData}
-        onRevertAllTeams={handleRevertAllTeams}
-        adminUser={adminUser}
-        onAdminLogin={handleAdminLogin}
-        onAdminLogout={handleAdminLogout}
+        teamLeadName={leadMember?.name || 'Mazzy'}
       />
     </div>
   );

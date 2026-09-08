@@ -7,7 +7,7 @@ import {
   Layers,
   X
 } from 'lucide-react';
-import { TeamSummary } from '../data/defaultTeams';
+import { TeamSummary } from '../types';
 
 interface TeamSwitcherProps {
   teams: TeamSummary[];

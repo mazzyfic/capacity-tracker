@@ -1,11 +1,7 @@
-import { AppData } from '../types';
+import { AppData, TeamSummary } from '../types';
 import { getRolling2Weeks } from '../utils/dateUtils';
 
-export interface TeamSummary {
-  id: string;
-  name: string;
-  leadName: string;
-}
+export type { TeamSummary };
 
 export const DEFAULT_TEAMS_LIST: TeamSummary[] = [
   { id: 'team_mazzy', name: 'Team Mazzy', leadName: 'Mazzy' },

@@ -34,6 +34,7 @@ import {
 import { DEFAULT_TEAMS_LIST, getDefaultTeamData } from './data/defaultTeams';
 import { TeamSwitcher } from './components/TeamSwitcher';
 import { RevertDateModal } from './components/RevertDateModal';
+import { checkAndCreateDailyAutoSnapshot } from './utils/snapshotUtils';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -154,13 +155,15 @@ export default function App() {
       }
     }
 
-    // Clean and normalize team info while keeping all existing allocations intact
+    // Clean and normalize team info while restoring exact allocations if snapshot provided
     const cleaned: AppData = {
       ...sourceData,
-      allocations: {
-        ...(appData.allocations || {}),
-        ...(sourceData.allocations || {}),
-      },
+      allocations: customData
+        ? { ...(customData.allocations || {}) }
+        : {
+            ...(appData.allocations || {}),
+            ...(sourceData.allocations || {}),
+          },
     };
 
     if (currentTeamId === 'team_mazzy') {
@@ -322,6 +325,8 @@ export default function App() {
             lastSavedJsonRef.current = JSON.stringify(synchronized);
             setAppData(synchronized);
             isRemoteLoadedRef.current = true;
+            // Insurance: check and ensure a daily auto-snapshot exists in Firestore
+            checkAndCreateDailyAutoSnapshot(currentTeamId, synchronized.teamTitle, synchronized);
           }
         } else {
           // Document does not exist yet; seed it with current team default data
@@ -332,6 +337,7 @@ export default function App() {
           });
           setAppData(initialData);
           isRemoteLoadedRef.current = true;
+          checkAndCreateDailyAutoSnapshot(currentTeamId, initialData.teamTitle, initialData);
         }
         setCloudStatus('connected');
         setIsInitialLoad(false);
@@ -1197,10 +1203,10 @@ export default function App() {
             type="button"
             onClick={() => setRevertDateModalOpen(true)}
             className="px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold rounded-lg shadow-2xs transition-colors cursor-pointer flex items-center gap-1.5"
-            title="Revert current data to an earlier date"
+            title="Insurance snapshots and calendar horizon reversion"
           >
             <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
-            <span>Revert to Earlier Date</span>
+            <span>Snapshots &amp; Revert</span>
           </button>
 
           <button

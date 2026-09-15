@@ -49,3 +49,10 @@ export interface DataSnapshot {
   data: AppData;
 }
 
+export interface ModalAllocationRow extends AllocationItem {
+  initialPercent?: number;
+  initialEndDate?: string;
+  initialEndDateType?: ProjectEndDateType;
+  initialChanged?: boolean;
+}
+

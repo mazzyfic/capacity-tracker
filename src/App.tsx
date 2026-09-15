@@ -4,7 +4,6 @@ import {
   Users, 
   FileSpreadsheet, 
   Edit2, 
-  Check, 
   X, 
   Plus, 
   Trash2, 
@@ -13,16 +12,22 @@ import {
   Zap, 
   CheckCircle2, 
   UserPlus, 
-  AlertTriangle,
-  Cloud,
-  CloudCheck,
-  CloudOff,
-  RefreshCw,
-  MessageSquare,
-  GripVertical,
-  RotateCcw,
+  CloudCheck, 
+  CloudOff, 
+  RefreshCw, 
+  MessageSquare, 
+  GripVertical, 
+  RotateCcw, 
 } from 'lucide-react';
-import { StaffMember, WeekHorizon, AllocationItem, AppData, TeamSummary } from './types';
+import { 
+  StaffMember, 
+  WeekHorizon, 
+  AllocationItem, 
+  AppData, 
+  TeamSummary, 
+  ProjectEndDateType,
+  ModalAllocationRow
+} from './types';
 import { 
   syncRollingWeeksAndAllocations, 
   filterActiveAllocations,
@@ -34,6 +39,7 @@ import { DEFAULT_TEAMS_LIST, getDefaultTeamData } from './data/defaultTeams';
 import { TeamSwitcher } from './components/TeamSwitcher';
 import { RevertDateModal } from './components/RevertDateModal';
 import { checkAndCreateDailyAutoSnapshot } from './utils/snapshotUtils';
+import { normalizeTeamData, formatAllocationDetail } from './utils/helpers';
 import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -41,10 +47,55 @@ Chart.register(...registerables);
 
 const FIRESTORE_COLLECTION = 'capacity_tracker';
 
+/**
+ * Optimized memoized component for member notes that prevents re-rendering
+ * the main table grid on every keystroke and syncs on blur/Enter.
+ */
+interface StaffNoteInputProps {
+  staffId: string;
+  initialNote: string;
+  onSaveNote: (staffId: string, note: string) => void;
+}
+
+const StaffNoteInput: React.FC<StaffNoteInputProps> = React.memo(({ staffId, initialNote, onSaveNote }) => {
+  const [localNote, setLocalNote] = useState(initialNote);
+
+  useEffect(() => {
+    setLocalNote(initialNote);
+  }, [initialNote]);
+
+  const handleBlur = () => {
+    if (localNote !== initialNote) {
+      onSaveNote(staffId, localNote);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.currentTarget.blur();
+    }
+  };
+
+  return (
+    <div className="relative group/note flex items-center">
+      <input
+        type="text"
+        value={localNote}
+        onChange={(e) => setLocalNote(e.target.value)}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        placeholder="Add note (e.g. PTO, on-call)..."
+        className="w-full text-xs text-slate-800 placeholder-slate-400 bg-slate-50/60 hover:bg-slate-100/80 focus:bg-white border border-slate-200/60 hover:border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-lg px-3 py-1.5 transition-all outline-none"
+        title="Add notes for this team member"
+      />
+    </div>
+  );
+});
+StaffNoteInput.displayName = 'StaffNoteInput';
+
 export default function App() {
   const [cloudStatus, setCloudStatus] = useState<'syncing' | 'connected' | 'error'>('syncing');
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const skipNextCloudSave = useRef(false);
 
   // Teams List & Active Team ID
   const [teamsList, setTeamsList] = useState<TeamSummary[]>(() => {
@@ -155,7 +206,7 @@ export default function App() {
     }
 
     // Clean and normalize team info while restoring exact allocations if snapshot provided
-    const cleaned: AppData = {
+    const merged: AppData = {
       ...sourceData,
       allocations: customData
         ? { ...(customData.allocations || {}) }
@@ -165,20 +216,7 @@ export default function App() {
           },
     };
 
-    if (currentTeamId === 'team_mazzy') {
-      cleaned.teamTitle = 'Team Mazzy';
-      const mazzyMember = cleaned.staff.find(s => s.name.toLowerCase() === 'mazzy');
-      if (mazzyMember) cleaned.teamLeadId = mazzyMember.id;
-    } else if (currentTeamId === 'team_lindsay') {
-      cleaned.teamTitle = 'Team Lindsay';
-      const lindsayMember = cleaned.staff.find(s => s.name.toLowerCase() === 'lindsay');
-      if (lindsayMember) cleaned.teamLeadId = lindsayMember.id;
-    } else if (currentTeamId === 'team_kimyatta') {
-      cleaned.teamTitle = 'Team Kimyatta';
-      const kimyattaMember = cleaned.staff.find(s => s.name.toLowerCase() === 'kimyatta');
-      if (kimyattaMember) cleaned.teamLeadId = kimyattaMember.id;
-    }
-
+    const cleaned = normalizeTeamData(merged, currentTeamId);
     const synchronized = syncRollingWeeksAndAllocations(cleaned, targetBaseDate);
     const jsonStr = JSON.stringify(synchronized);
 
@@ -208,7 +246,7 @@ export default function App() {
             let hasChanged = false;
             const validIds = new Set(['team_mazzy', 'team_kimyatta', 'team_lindsay']);
             const cleanTeams: TeamSummary[] = DEFAULT_TEAMS_LIST.map(def => {
-              const matched = data.teams.find((t: any) => t.id === def.id);
+              const matched = (data.teams as TeamSummary[]).find((t: TeamSummary) => t.id === def.id);
               if (matched) {
                 if (matched.name !== def.name || matched.leadName !== def.leadName) {
                   hasChanged = true;
@@ -223,7 +261,7 @@ export default function App() {
               return def;
             });
 
-            if (data.teams.length !== 3 || data.teams.some((t: any) => !validIds.has(t.id))) {
+            if (data.teams.length !== 3 || (data.teams as TeamSummary[]).some((t: TeamSummary) => !validIds.has(t.id))) {
               hasChanged = true;
             }
 
@@ -284,41 +322,7 @@ export default function App() {
               return;
             }
 
-            const cleanedData = { ...remoteData };
-            
-            // Clean up Team 1 (Team Mazzy)
-            if (currentTeamId === 'team_mazzy') {
-              cleanedData.teamTitle = 'Team Mazzy';
-              const mazzyMember = cleanedData.staff.find(s => s.name.toLowerCase() === 'mazzy');
-              if (mazzyMember && cleanedData.teamLeadId !== mazzyMember.id) {
-                cleanedData.teamLeadId = mazzyMember.id;
-              }
-            }
-
-            // Clean up Team 2 (Team Lindsay)
-            if (currentTeamId === 'team_lindsay') {
-              cleanedData.teamTitle = 'Team Lindsay';
-              const lindsayMember = cleanedData.staff.find(s => s.name.toLowerCase() === 'lindsay');
-              if (lindsayMember && cleanedData.teamLeadId !== lindsayMember.id) {
-                cleanedData.teamLeadId = lindsayMember.id;
-              }
-            }
-
-            // Clean up Team 3 (Team Kimyatta)
-            if (currentTeamId === 'team_kimyatta') {
-              cleanedData.teamTitle = 'Team Kimyatta';
-              const kimyattaMember = cleanedData.staff.find(s => s.name.toLowerCase() === 'kimyatta') || cleanedData.staff[0];
-              if (kimyattaMember) {
-                cleanedData.teamLeadId = kimyattaMember.id;
-              }
-            }
-
-            // Always arrange staff members in alphabetical order
-            if (Array.isArray(cleanedData.staff)) {
-              cleanedData.staff = cleanedData.staff.slice().sort((a, b) => 
-                a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
-              );
-            }
+            const cleanedData = normalizeTeamData(remoteData, currentTeamId);
 
             const synchronized = syncRollingWeeksAndAllocations(cleanedData);
             lastSavedJsonRef.current = JSON.stringify(synchronized);
@@ -326,6 +330,13 @@ export default function App() {
             isRemoteLoadedRef.current = true;
             // Insurance: check and ensure a daily auto-snapshot exists in Firestore
             checkAndCreateDailyAutoSnapshot(currentTeamId, synchronized.teamTitle, synchronized);
+
+            // If the schedule rolled forward from stale weeks, persist the newly rolled weeks to Firestore
+            if (cleanedData.weeks?.[0]?.startDate !== synchronized.weeks?.[0]?.startDate) {
+              setDoc(docRef, synchronized, { merge: true }).catch(err => {
+                console.error('Failed to sync rolled weeks to Firestore:', err);
+              });
+            }
           }
         } else {
           // Document does not exist yet; seed it with current team default data
@@ -387,7 +398,13 @@ export default function App() {
   // Automatically roll forward when a new week arrives or tab is focused
   useEffect(() => {
     const handleCheckWeek = () => {
-      setAppData(prev => syncRollingWeeksAndAllocations(prev));
+      setAppData(prev => {
+        const next = syncRollingWeeksAndAllocations(prev);
+        if (next.weeks?.[0]?.startDate !== prev.weeks?.[0]?.startDate) {
+          return next;
+        }
+        return prev;
+      });
     };
 
     const handleVisibility = () => {
@@ -410,13 +427,6 @@ export default function App() {
   const [rightPanelTab, setRightPanelTab] = useState<'heatmap' | 'chart'>('heatmap');
   
   // Workload Allocation Modal State
-  interface ModalAllocationRow extends AllocationItem {
-    isNew?: boolean;
-    initialPercent?: number;
-    initialChanged?: boolean;
-    userToggledChanged?: boolean;
-  }
-
   const [allocationModalOpen, setAllocationModalOpen] = useState(false);
   const [modalStaffId, setModalStaffId] = useState<string | null>(null);
   const [modalWeekId, setModalWeekId] = useState<string | null>(null);
@@ -432,15 +442,25 @@ export default function App() {
 
   // Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showToast = (msg: unknown) => {
-    if (typeof msg === 'string') {
-      setToastMessage(msg);
-    } else {
-      setToastMessage('Allocations saved successfully');
+  const showToast = useCallback((msg: unknown) => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
     }
-    setTimeout(() => setToastMessage(null), 3000);
-  };
+    const text = typeof msg === 'string' ? msg : 'Allocations saved successfully';
+    setToastMessage(text);
+    toastTimerRef.current = setTimeout(() => {
+      setToastMessage(null);
+      toastTimerRef.current = null;
+    }, 3000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   // Active 2 weeks horizon
   const active2Weeks = useMemo(() => {
@@ -626,10 +646,13 @@ export default function App() {
       ...item, 
       isNew: false,
       initialPercent: item.percent,
+      initialEndDateType: item.endDateType || 'date',
+      initialEndDate: item.endDate || '',
       initialChanged: item.changed || false,
       userToggledChanged: false,
       endDateType: item.endDateType || 'date',
-      endDate: item.endDate || ''
+      endDate: item.endDate || '',
+      changed: item.changed || false,
     })));
     setAllocationModalOpen(true);
   };
@@ -649,6 +672,8 @@ export default function App() {
         percent: 0, 
         isNew: true,
         initialPercent: undefined,
+        initialEndDateType: 'date',
+        initialEndDate: '',
         initialChanged: false,
         userToggledChanged: false,
         changed: false, 
@@ -672,28 +697,38 @@ export default function App() {
       const row = next[index];
       if (!row) return prev;
 
-      if (field === 'project') {
-        next[index] = { ...row, project: String(value) };
-      } else if (field === 'endDateType') {
-        const newType = value as 'date' | 'ongoing' | 'secondary_tasks';
-        next[index] = { ...row, endDateType: newType };
-      } else if (field === 'endDate') {
-        next[index] = { ...row, endDate: String(value) };
-      } else {
-        const newPct = Math.max(0, Number(value) || 0);
-        let changed = row.changed;
-        // Only auto-flag changed if the user hasn't explicitly toggled this row
-        if (!row.userToggledChanged) {
-          if (!row.isNew && row.initialPercent !== undefined) {
-            changed = newPct !== row.initialPercent;
-          }
+      const nextProject = field === 'project' ? String(value) : row.project;
+      const nextType = field === 'endDateType' ? (value as ProjectEndDateType) : (row.endDateType || 'date');
+      const nextDate = field === 'endDate' ? String(value) : (row.endDate || '');
+      const nextPct = field === 'percent' ? Math.max(0, Number(value) || 0) : row.percent;
+
+      let changed = row.changed;
+      // Only auto-flag changed if the user hasn't explicitly toggled this row's button
+      if (!row.userToggledChanged) {
+        if (!row.isNew) {
+          const pctChanged = row.initialPercent !== undefined && nextPct !== row.initialPercent;
+          const initialType = row.initialEndDateType || 'date';
+          const typeChanged = initialType !== nextType;
+          const dateValChanged = (nextType === 'date' || initialType === 'date') && (row.initialEndDate || '') !== nextDate;
+          const isModified = pctChanged || typeChanged || dateValChanged;
+
+          // If modified, light up lightning icon; if returned to original values, preserve original status
+          changed = isModified || (!!row.initialChanged && !isModified);
+        } else {
+          // New project row on initial entry: choosing 'ongoing', 'Secondary', or entering percent/date
+          // must not activate the changed icon. Only saved data date or percentage changed after initial entry activates it.
+          changed = false;
         }
-        next[index] = { 
-          ...row, 
-          percent: newPct, 
-          changed 
-        };
       }
+
+      next[index] = { 
+        ...row, 
+        project: nextProject,
+        percent: nextPct, 
+        endDateType: nextType,
+        endDate: nextDate,
+        changed 
+      };
       return next;
     });
   };
@@ -757,16 +792,6 @@ export default function App() {
     setDragOverRowIndex(null);
   };
 
-  const handleMoveRow = (fromIndex: number, toIndex: number) => {
-    if (toIndex < 0 || toIndex >= modalRows.length) return;
-    setModalRows(prev => {
-      const next = [...prev];
-      const [movedItem] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, movedItem);
-      return next;
-    });
-  };
-
   // Copy helper 1: Copy From Prev Week
   const handleCopyFromPrevWeek = () => {
     if (!modalStaffId || !modalWeekId) return;
@@ -789,7 +814,10 @@ export default function App() {
       changed: false,
       isNew: false,
       initialPercent: item.percent,
+      initialEndDateType: item.endDateType || 'date',
+      initialEndDate: item.endDate || '',
       initialChanged: false,
+      userToggledChanged: false,
       endDateType: item.endDateType || 'date',
       endDate: item.endDate || ''
     })));
@@ -891,6 +919,8 @@ export default function App() {
       .map(r => {
         const projName = r.project.trim();
         const newPct = Number(r.percent) || 0;
+        const newEndDateType: ProjectEndDateType = r.endDateType || 'date';
+        const newEndDate = r.endDate || '';
         const existing = oldList.find(p => p.project.toLowerCase() === projName.toLowerCase());
 
         let isChanged = false;
@@ -898,24 +928,34 @@ export default function App() {
           // Explicit user toggle (ON or OFF) strictly overrides everything
           isChanged = !!r.changed;
         } else if (r.isNew) {
-          // Newly added project row in this modal session: keep manual state
-          isChanged = !!r.changed;
-        } else if (r.initialPercent !== undefined) {
-          // Auto-mark changed only if the percentage changed from initial loaded value
-          isChanged = newPct !== r.initialPercent;
+          // Newly added project row on initial entry: NOT changed
+          isChanged = false;
+        } else if (r.initialPercent !== undefined || r.initialEndDate !== undefined || r.initialEndDateType !== undefined) {
+          // Auto-mark changed if percentage, date, or date type changed from initial loaded value
+          const pctChanged = r.initialPercent !== undefined && newPct !== r.initialPercent;
+          const initialType = r.initialEndDateType || 'date';
+          const typeChanged = initialType !== newEndDateType;
+          const dateValChanged = (newEndDateType === 'date' || initialType === 'date') && (r.initialEndDate || '') !== newEndDate;
+          const isModified = pctChanged || typeChanged || dateValChanged;
+
+          isChanged = isModified || (!!r.initialChanged && !isModified);
         } else if (existing) {
-          // Fallback to existing percent difference if initialPercent missing
-          isChanged = existing.percent !== newPct;
+          // Fallback to existing project comparison if initial values missing
+          const pctChanged = existing.percent !== newPct;
+          const initialType = existing.endDateType || 'date';
+          const typeChanged = initialType !== newEndDateType;
+          const dateValChanged = (newEndDateType === 'date' || initialType === 'date') && (existing.endDate || '') !== newEndDate;
+          isChanged = pctChanged || typeChanged || dateValChanged || !!existing.changed;
         } else {
-          isChanged = !!r.changed;
+          isChanged = false;
         }
 
         return { 
           project: projName, 
           percent: newPct, 
           changed: isChanged,
-          endDateType: r.endDateType || 'date',
-          endDate: r.endDate || ''
+          endDateType: newEndDateType,
+          endDate: newEndDate
         };
       });
 
@@ -950,6 +990,23 @@ export default function App() {
     showToast('Cleared "Changed" status');
   };
 
+  // Registry sync helper for team lead updates
+  const syncTeamLeadToRegistry = useCallback((teamId: string, leadName: string) => {
+    setTeamsList(prev => {
+      const updatedTeams = prev.map(t => 
+        t.id === teamId ? { ...t, leadName } : t
+      );
+      try {
+        localStorage.setItem('tracker_teams_list', JSON.stringify(updatedTeams));
+      } catch (e) {
+        console.error('Failed to cache teams list', e);
+      }
+      const regRef = doc(db, FIRESTORE_COLLECTION, 'teams_registry');
+      setDoc(regRef, { teams: updatedTeams }, { merge: true }).catch(console.error);
+      return updatedTeams;
+    });
+  }, []);
+
   // Staff Notes Update Handler
   const handleUpdateStaffNotes = (staffId: string, noteText: string) => {
     const updatedNotes = { ...(appData.notes || {}), [staffId]: noteText };
@@ -976,13 +1033,7 @@ export default function App() {
       const memberNote = (appData.notes?.[stat.staff.id] || stat.staff.notes || '').replace(/"/g, '""');
       const breakdown = active2Weeks.map(w => {
         const items = stat.weekLoads[w.id]?.items || [];
-        const details = items.map(i => {
-          let endInfo = '';
-          if (i.endDateType === 'ongoing') endInfo = ' (End: Ongoing)';
-          else if (i.endDateType === 'secondary_tasks') endInfo = ' (End: Secondary Tasks)';
-          else if (i.endDate) endInfo = ` (End: ${i.endDate})`;
-          return `${i.project}: ${i.percent}%${endInfo}`;
-        }).join('; ');
+        const details = items.map(i => formatAllocationDetail(i)).join('; ');
         return `[${w.label}: ${details || 'None'}]`;
       }).join(' | ');
 
@@ -992,7 +1043,7 @@ export default function App() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `capacity_tracker_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `capacity_tracker_${formatDateIso(new Date())}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1040,12 +1091,7 @@ export default function App() {
       
       // If this member is the team lead, also update the teams_registry leadName
       if (prev.teamLeadId === id) {
-        const updatedTeams = teamsList.map(t => 
-          t.id === currentTeamId ? { ...t, leadName: trimmedName } : t
-        );
-        setTeamsList(updatedTeams);
-        const regRef = doc(db, FIRESTORE_COLLECTION, 'teams_registry');
-        setDoc(regRef, { teams: updatedTeams }, { merge: true }).catch(console.error);
+        syncTeamLeadToRegistry(currentTeamId, trimmedName);
       }
 
       return {
@@ -1071,12 +1117,7 @@ export default function App() {
       const nextLead = prev.teamLeadId === id ? (nextStaff[0]?.id || '') : prev.teamLeadId;
       const nextLeadMember = nextStaff.find(s => s.id === nextLead);
       if (nextLeadMember) {
-        const updatedTeams = teamsList.map(t => 
-          t.id === currentTeamId ? { ...t, leadName: nextLeadMember.name } : t
-        );
-        setTeamsList(updatedTeams);
-        const regRef = doc(db, FIRESTORE_COLLECTION, 'teams_registry');
-        setDoc(regRef, { teams: updatedTeams }, { merge: true }).catch(console.error);
+        syncTeamLeadToRegistry(currentTeamId, nextLeadMember.name);
       }
       return {
         ...prev,
@@ -1091,12 +1132,7 @@ export default function App() {
     setAppData(prev => {
       const nextLeadMember = prev.staff.find(s => s.id === id);
       if (nextLeadMember) {
-        const updatedTeams = teamsList.map(t => 
-          t.id === currentTeamId ? { ...t, leadName: nextLeadMember.name } : t
-        );
-        setTeamsList(updatedTeams);
-        const regRef = doc(db, FIRESTORE_COLLECTION, 'teams_registry');
-        setDoc(regRef, { teams: updatedTeams }, { merge: true }).catch(console.error);
+        syncTeamLeadToRegistry(currentTeamId, nextLeadMember.name);
       }
       return { ...prev, teamLeadId: id };
     });
@@ -1410,7 +1446,13 @@ export default function App() {
                             const isTarget = sum >= 80 && sum <= 100;
                             const changedItems = (weekData.items || []).filter(p => p.changed);
                             const changedTooltip = changedItems.length > 0
-                              ? `Changed projects:\n${changedItems.map(p => `• ${p.project}: ${p.percent}%`).join('\n')}`
+                              ? `Changed projects:\n${changedItems.map(p => {
+                                  let endInfo = '';
+                                  if (p.endDateType === 'ongoing') endInfo = ' (Ongoing)';
+                                  else if (p.endDateType === 'secondary_tasks') endInfo = ' (Secondary Tasks)';
+                                  else if (p.endDate) endInfo = ` (End: ${p.endDate})`;
+                                  return `• ${p.project}: ${p.percent}%${endInfo}`;
+                                }).join('\n')}`
                               : 'Recently changed';
 
                             let pillStyle = 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:border-blue-300';
@@ -1513,16 +1555,11 @@ export default function App() {
 
                           {/* Notes Column */}
                           <td className="py-3 px-6 text-left">
-                            <div className="relative group/note flex items-center">
-                              <input
-                                type="text"
-                                value={currentNote}
-                                onChange={(e) => handleUpdateStaffNotes(staff.id, e.target.value)}
-                                placeholder="Add note (e.g. PTO, on-call)..."
-                                className="w-full text-xs text-slate-800 placeholder-slate-400 bg-slate-50/60 hover:bg-slate-100/80 focus:bg-white border border-slate-200/60 hover:border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 rounded-lg px-3 py-1.5 transition-all outline-none"
-                                title="Add notes for this team member"
-                              />
-                            </div>
+                            <StaffNoteInput
+                              staffId={staff.id}
+                              initialNote={currentNote}
+                              onSaveNote={handleUpdateStaffNotes}
+                            />
                           </td>
                         </tr>
                       );
@@ -1572,7 +1609,13 @@ export default function App() {
                     const memberChangedItems = active2Weeks.flatMap(w => 
                       (stat.weekLoads[w.id]?.items || [])
                         .filter(p => p.changed)
-                        .map(p => `${p.project} (${p.percent}%)`)
+                        .map(p => {
+                          let endInfo = '';
+                          if (p.endDateType === 'ongoing') endInfo = ' (Ongoing)';
+                          else if (p.endDateType === 'secondary_tasks') endInfo = ' (Secondary Tasks)';
+                          else if (p.endDate) endInfo = ` (End: ${p.endDate})`;
+                          return `${p.project} (${p.percent}%)${endInfo}`;
+                        })
                     );
                     const hasChanged = memberChangedItems.length > 0;
                     

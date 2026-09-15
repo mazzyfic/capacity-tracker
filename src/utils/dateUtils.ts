@@ -86,6 +86,9 @@ export function filterActiveAllocations(items: AllocationItem[], weekStartDate: 
  * Every new week added is an exact duplicate of the previous week.
  */
 export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate?: Date): AppData {
+  const currentWorkWeekMonday = getMondayOfWeek(new Date());
+  const currentWorkWeekIso = formatDateIso(currentWorkWeekMonday);
+
   let rollingWeeks: WeekHorizon[];
   if (baseDate) {
     rollingWeeks = getRolling2Weeks(baseDate);
@@ -93,7 +96,8 @@ export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate?: Dat
     prevData.weeks &&
     prevData.weeks.length === 2 &&
     prevData.weeks[0]?.id &&
-    prevData.weeks[1]?.id
+    prevData.weeks[1]?.id &&
+    prevData.weeks[0].startDate === currentWorkWeekIso
   ) {
     rollingWeeks = prevData.weeks;
   } else {
@@ -143,7 +147,7 @@ export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate?: Dat
       }));
     }
 
-    // 2. Next Week Allocations: Duplicate the current week's allocations
+    // 2. Next Week Allocations: Duplicate the current week's active allocations
     let nextItems = updatedAllocations[nextKey];
 
     if (!nextItems || nextItems.length === 0) {
@@ -151,8 +155,9 @@ export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate?: Dat
       if (matchedNext && updatedAllocations[`${staff.id}_${matchedNext.id}`]?.length) {
         nextItems = updatedAllocations[`${staff.id}_${matchedNext.id}`];
       } else {
-        // Duplicate the current week's allocations directly
-        nextItems = updatedAllocations[currentKey];
+        // Filter out expired date items when rolling to next week
+        const currentActive = filterActiveAllocations(updatedAllocations[currentKey] || [], nextWeek.startDate);
+        nextItems = currentActive.length > 0 ? currentActive : updatedAllocations[currentKey];
       }
 
       if (!nextItems || nextItems.length === 0) {

@@ -16,12 +16,17 @@ import {
   Layers,
 } from 'lucide-react';
 import { AppData, DataSnapshot } from '../types';
-import { parseDateIso, formatWeekLabel, getMondayOfWeek } from '../utils/dateUtils';
+import { parseDateIso, formatDateIso, formatWeekLabel, getMondayOfWeek } from '../utils/dateUtils';
 import {
   fetchTeamSnapshots,
   createTeamSnapshot,
   deleteTeamSnapshot,
 } from '../utils/snapshotUtils';
+
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
 
 interface RevertDateModalProps {
   isOpen: boolean;
@@ -46,20 +51,15 @@ export const RevertDateModal: React.FC<RevertDateModalProps> = ({
   const [activeTab, setActiveTab] = useState<'snapshots' | 'calendar'>('snapshots');
 
   // Compute today's date dynamically
-  const getTodayIso = () => {
-    const d = new Date();
-    return d.toISOString().split('T')[0];
-  };
-
-  const todayIso = getTodayIso();
+  const todayIso = formatDateIso(new Date());
 
   const getDefaultRevertDate = () => {
     try {
       const today = new Date();
       const currentMon = getMondayOfWeek(today);
       const prevMon = new Date(currentMon.getFullYear(), currentMon.getMonth(), currentMon.getDate() - 7);
-      return prevMon.toISOString().split('T')[0];
-    } catch (e) {
+      return formatDateIso(prevMon);
+    } catch {
       return '2026-08-31';
     }
   };
@@ -110,8 +110,8 @@ export const RevertDateModal: React.FC<RevertDateModalProps> = ({
       const mon2 = new Date(mon1.getFullYear(), mon1.getMonth(), mon1.getDate() + 7);
       const fri2 = new Date(mon2.getFullYear(), mon2.getMonth(), mon2.getDate() + 4);
 
-      const mon1Iso = mon1.toISOString().split('T')[0];
-      const mon2Iso = mon2.toISOString().split('T')[0];
+      const mon1Iso = formatDateIso(mon1);
+      const mon2Iso = formatDateIso(mon2);
 
       return {
         w1Label: formatWeekLabel(mon1, fri1),
@@ -119,7 +119,7 @@ export const RevertDateModal: React.FC<RevertDateModalProps> = ({
         w2Label: formatWeekLabel(mon2, fri2),
         w2Id: `w_${mon2Iso}`,
       };
-    } catch (e) {
+    } catch {
       return {
         w1Label: 'Selected Week',
         w1Id: '',
@@ -149,8 +149,8 @@ export const RevertDateModal: React.FC<RevertDateModalProps> = ({
       setTimeout(() => {
         onClose();
       }, 1200);
-    } catch (err: any) {
-      setErrorMessage(`Failed to revert to ${selectedCustomDate}: ${err.message}`);
+    } catch (err: unknown) {
+      setErrorMessage(`Failed to revert to ${selectedCustomDate}: ${getErrorMessage(err)}`);
     } finally {
       setIsReverting(false);
     }
@@ -168,8 +168,8 @@ export const RevertDateModal: React.FC<RevertDateModalProps> = ({
       setTimeout(() => {
         onClose();
       }, 1200);
-    } catch (err: any) {
-      setErrorMessage(`Failed to restore snapshot: ${err.message}`);
+    } catch (err: unknown) {
+      setErrorMessage(`Failed to restore snapshot: ${getErrorMessage(err)}`);
     } finally {
       setIsReverting(false);
     }
@@ -193,8 +193,8 @@ export const RevertDateModal: React.FC<RevertDateModalProps> = ({
       setNewSnapName('');
       setShowCreateForm(false);
       await loadSnapshots();
-    } catch (err: any) {
-      setErrorMessage(`Failed to create snapshot: ${err.message}`);
+    } catch (err: unknown) {
+      setErrorMessage(`Failed to create snapshot: ${getErrorMessage(err)}`);
     } finally {
       setIsCreatingSnap(false);
     }
@@ -208,8 +208,8 @@ export const RevertDateModal: React.FC<RevertDateModalProps> = ({
       await deleteTeamSnapshot(snapId);
       setSnapshots((prev) => prev.filter((s) => s.id !== snapId));
       setSuccessMessage(`Deleted snapshot "${snapName}"`);
-    } catch (err: any) {
-      setErrorMessage(`Failed to delete snapshot: ${err.message}`);
+    } catch (err: unknown) {
+      setErrorMessage(`Failed to delete snapshot: ${getErrorMessage(err)}`);
     } finally {
       setDeletingSnapId(null);
     }

@@ -15,8 +15,13 @@ interface TeamSwitcherProps {
   onSelectTeam: (teamId: string) => void;
   onUpdateTeam: (teamId: string, name: string, leadName: string) => void;
   activeTeamTitle: string;
-  activeLeadName: string;
+  activeLeadName?: string;
 }
+
+const cleanTeamName = (name: string): string => {
+  if (!name) return '';
+  return name.replace(/\s*Capacity\s*Tracker\s*/gi, '').trim();
+};
 
 export const TeamSwitcher: React.FC<TeamSwitcherProps> = ({
   teams,
@@ -24,13 +29,7 @@ export const TeamSwitcher: React.FC<TeamSwitcherProps> = ({
   onSelectTeam,
   onUpdateTeam,
   activeTeamTitle,
-  activeLeadName,
 }) => {
-  const cleanTeamName = (name: string) => {
-    if (!name) return '';
-    return name.replace(/\s*Capacity\s*Tracker\s*/gi, '').trim();
-  };
-
   const [isOpen, setIsOpen] = useState(false);
   
   // State for editing any team in the list

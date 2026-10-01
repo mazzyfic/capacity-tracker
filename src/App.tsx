@@ -18,6 +18,8 @@ import {
   MessageSquare, 
   GripVertical, 
   RotateCcw, 
+  AlertTriangle,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { 
   StaffMember, 
@@ -31,16 +33,18 @@ import {
 import { 
   syncRollingWeeksAndAllocations, 
   filterActiveAllocations,
+  isAllocationExpired,
   parseDateIso,
   formatDateIso,
-  formatWeekLabel
+  formatWeekLabel,
+  getMondayOfWeek
 } from './utils/dateUtils';
 import { DEFAULT_TEAMS_LIST, getDefaultTeamData } from './data/defaultTeams';
 import { TeamSwitcher } from './components/TeamSwitcher';
 import { RevertDateModal } from './components/RevertDateModal';
-import { checkAndCreateDailyAutoSnapshot } from './utils/snapshotUtils';
-import { normalizeTeamData, formatAllocationDetail } from './utils/helpers';
-import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
+import { checkAndCreateDailyAutoSnapshot, fetchTeamSnapshots } from './utils/snapshotUtils';
+import { normalizeTeamData, formatAllocationDetail, isCorruptedFactoryData } from './utils/helpers';
+import { doc, onSnapshot, setDoc, getDoc, getDocFromServer } from 'firebase/firestore';
 import { db } from './firebase';
 
 Chart.register(...registerables);
@@ -135,8 +139,15 @@ export default function App() {
       const raw = localStorage.getItem(`tracker_team_${activeId}`);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed && Array.isArray(parsed.staff) && parsed.staff.length > 0) {
+        if (
+          parsed &&
+          Array.isArray(parsed.staff) &&
+          parsed.staff.length > 0 &&
+          !isCorruptedFactoryData(parsed, activeId)
+        ) {
           return syncRollingWeeksAndAllocations(parsed);
+        } else if (isCorruptedFactoryData(parsed, activeId)) {
+          localStorage.removeItem(`tracker_team_${activeId}`);
         }
       }
     } catch (e) {
@@ -147,6 +158,9 @@ export default function App() {
 
   const lastSavedJsonRef = useRef<string>('');
   const isRemoteLoadedRef = useRef<boolean>(false);
+  const isCustomHorizonRef = useRef<boolean>(false);
+  const [isCustomHorizon, setIsCustomHorizon] = useState<boolean>(false);
+  const [confirmCopyAll, setConfirmCopyAll] = useState<boolean>(false);
 
   const getTeamDocId = (teamId: string): string => {
     if (teamId === 'team_kimyatta' || teamId === 'team_lindsay' || teamId === 'team_mazzy') {
@@ -156,6 +170,11 @@ export default function App() {
   };
 
   const persistAppData = useCallback((nextData: AppData) => {
+    if (isCorruptedFactoryData(nextData, currentTeamId)) {
+      console.warn('Blocked attempt to persist corrupted factory data for', currentTeamId);
+      return;
+    }
+
     const jsonStr = JSON.stringify(nextData);
     lastSavedJsonRef.current = jsonStr;
     setAppData(nextData);
@@ -168,6 +187,40 @@ export default function App() {
 
     const docId = getTeamDocId(currentTeamId);
     const docRef = doc(db, FIRESTORE_COLLECTION, docId);
+
+    // If initial Firestore snapshot hasn't loaded yet, merge carefully on top of remote doc
+    if (!isRemoteLoadedRef.current) {
+      getDoc(docRef)
+        .then(remoteSnap => {
+          if (remoteSnap.exists()) {
+            const remoteData = remoteSnap.data() as AppData;
+            if (!isCorruptedFactoryData(remoteData, currentTeamId)) {
+              const safeMerged: AppData = {
+                ...remoteData,
+                ...nextData,
+                allocations: {
+                  ...(remoteData.allocations || {}),
+                  ...(nextData.allocations || {}),
+                },
+                notes: {
+                  ...(remoteData.notes || {}),
+                  ...(nextData.notes || {}),
+                },
+              };
+              isRemoteLoadedRef.current = true;
+              return setDoc(docRef, safeMerged, { merge: true });
+            }
+          }
+          return setDoc(docRef, nextData, { merge: true });
+        })
+        .then(() => setCloudStatus('connected'))
+        .catch(err => {
+          console.error('Error saving data to Firestore:', err);
+          setCloudStatus('error');
+        });
+      return;
+    }
+
     setDoc(docRef, nextData, { merge: true })
       .then(() => setCloudStatus('connected'))
       .catch(err => {
@@ -189,6 +242,12 @@ export default function App() {
       targetBaseDate = new Date();
     }
 
+    const currentMondayIso = formatDateIso(getMondayOfWeek(new Date()));
+    const targetMondayIso = formatDateIso(getMondayOfWeek(targetBaseDate));
+    const isCustom = targetMondayIso !== currentMondayIso;
+    isCustomHorizonRef.current = isCustom;
+    setIsCustomHorizon(isCustom);
+
     let sourceData = customData;
     if (!sourceData) {
       // Always get the latest data for THIS specific team from Firestore first
@@ -206,10 +265,14 @@ export default function App() {
     }
 
     // Clean and normalize team info while restoring exact allocations if snapshot provided
+    // and preserving historical week keys from existing appData
     const merged: AppData = {
       ...sourceData,
       allocations: customData
-        ? { ...(customData.allocations || {}) }
+        ? {
+            ...(appData.allocations || {}),
+            ...(customData.allocations || {}),
+          }
         : {
             ...(appData.allocations || {}),
             ...(sourceData.allocations || {}),
@@ -221,7 +284,7 @@ export default function App() {
     const jsonStr = JSON.stringify(synchronized);
 
     // Save the newly reverted horizon to Firestore and local storage
-    await setDoc(doc(db, FIRESTORE_COLLECTION, docId), synchronized);
+    await setDoc(doc(db, FIRESTORE_COLLECTION, docId), synchronized, { merge: true });
     localStorage.setItem(`tracker_team_${currentTeamId}`, jsonStr);
 
     lastSavedJsonRef.current = jsonStr;
@@ -229,9 +292,14 @@ export default function App() {
     setCloudStatus('connected');
   };
 
-  // Keep browser tab title strictly as FFID Capacity Tracker
+  // Keep browser tab title strictly as FFID Capacity Tracker & validate Firestore connection on boot
   useEffect(() => {
     document.title = 'FFID Capacity Tracker';
+    getDocFromServer(doc(db, FIRESTORE_COLLECTION, 'teams_registry')).catch((error) => {
+      if (error instanceof Error && error.message.includes('the client is offline')) {
+        console.error('Please check your Firebase configuration.');
+      }
+    });
   }, []);
 
   // 1. Sync Teams Registry with Firestore & auto-repair names
@@ -240,6 +308,7 @@ export default function App() {
     const unsubscribe = onSnapshot(
       regRef,
       (snapshot) => {
+        const isFromCache = snapshot.metadata.fromCache;
         if (snapshot.exists()) {
           const data = snapshot.data();
           if (Array.isArray(data?.teams) && data.teams.length > 0) {
@@ -248,7 +317,7 @@ export default function App() {
             const cleanTeams: TeamSummary[] = DEFAULT_TEAMS_LIST.map(def => {
               const matched = (data.teams as TeamSummary[]).find((t: TeamSummary) => t.id === def.id);
               if (matched) {
-                if (matched.name !== def.name || matched.leadName !== def.leadName) {
+                if (!matched.name || !matched.leadName) {
                   hasChanged = true;
                 }
                 return {
@@ -275,9 +344,9 @@ export default function App() {
               setDoc(regRef, { teams: cleanTeams }, { merge: true }).catch(console.error);
             }
           }
-        } else {
+        } else if (!isFromCache) {
           // Initialize teams registry document
-          setDoc(regRef, { teams: DEFAULT_TEAMS_LIST }).catch(err => {
+          setDoc(regRef, { teams: DEFAULT_TEAMS_LIST }, { merge: true }).catch(err => {
             console.error('Error seeding teams registry:', err);
           });
         }
@@ -292,6 +361,7 @@ export default function App() {
 
   // 2. Real-time Firestore sync listener for active team
   useEffect(() => {
+    let isCancelled = false;
     setIsInitialLoad(true);
     isRemoteLoadedRef.current = false;
     setCloudStatus('syncing');
@@ -301,18 +371,43 @@ export default function App() {
     
     const unsubscribe = onSnapshot(
       docRef,
-      (snapshot) => {
-        if (snapshot.metadata.hasPendingWrites) {
-          // Local pending writes: state in memory is already up to date, skip reverting
+      async (snapshot) => {
+        if (isCancelled) return;
+        const isFromCache = snapshot.metadata.fromCache;
+        if (snapshot.metadata.hasPendingWrites && isRemoteLoadedRef.current) {
+          // Local pending writes after initial load: state in memory is already up to date
           setCloudStatus('connected');
           setIsInitialLoad(false);
-          isRemoteLoadedRef.current = true;
           return;
         }
 
         if (snapshot.exists()) {
           const remoteData = snapshot.data() as AppData;
           if (remoteData && Array.isArray(remoteData.staff) && remoteData.staff.length > 0) {
+            // Self-heal if remote document was ever overwritten by generic factory data
+            if (isCorruptedFactoryData(remoteData, currentTeamId)) {
+              console.warn('Detected corrupted factory data in Firestore for', currentTeamId, '- recovering from snapshots');
+              const snaps = await fetchTeamSnapshots(currentTeamId);
+              if (isCancelled) return;
+              const validSnap = snaps.find(s => s.data && !isCorruptedFactoryData(s.data, currentTeamId));
+              const recoveryBase = validSnap?.data || getDefaultTeamData(currentTeamId);
+              const cleanedRecovery = normalizeTeamData(recoveryBase, currentTeamId);
+              const syncedRecovery = syncRollingWeeksAndAllocations(cleanedRecovery);
+              const recoveryJson = JSON.stringify(syncedRecovery);
+              lastSavedJsonRef.current = recoveryJson;
+              setAppData(syncedRecovery);
+              isRemoteLoadedRef.current = true;
+              try {
+                localStorage.setItem(`tracker_team_${currentTeamId}`, recoveryJson);
+              } catch {}
+              await setDoc(docRef, syncedRecovery, { merge: true }).catch(console.error);
+              if (isCancelled) return;
+              checkAndCreateDailyAutoSnapshot(currentTeamId, syncedRecovery.teamTitle, syncedRecovery);
+              setCloudStatus('connected');
+              setIsInitialLoad(false);
+              return;
+            }
+
             const rawJson = JSON.stringify(remoteData);
             // Skip re-setting state if this snapshot reflects our own saved data
             if (rawJson === lastSavedJsonRef.current) {
@@ -323,26 +418,41 @@ export default function App() {
             }
 
             const cleanedData = normalizeTeamData(remoteData, currentTeamId);
+            const customBaseDate = isCustomHorizonRef.current && cleanedData.weeks?.[0]?.startDate
+              ? parseDateIso(cleanedData.weeks[0].startDate)
+              : undefined;
 
-            const synchronized = syncRollingWeeksAndAllocations(cleanedData);
-            lastSavedJsonRef.current = JSON.stringify(synchronized);
+            const synchronized = syncRollingWeeksAndAllocations(cleanedData, customBaseDate);
+            const syncJson = JSON.stringify(synchronized);
+            lastSavedJsonRef.current = syncJson;
             setAppData(synchronized);
             isRemoteLoadedRef.current = true;
+            try {
+              localStorage.setItem(`tracker_team_${currentTeamId}`, syncJson);
+            } catch {}
             // Insurance: check and ensure a daily auto-snapshot exists in Firestore
             checkAndCreateDailyAutoSnapshot(currentTeamId, synchronized.teamTitle, synchronized);
 
             // If the schedule rolled forward from stale weeks, persist the newly rolled weeks to Firestore
-            if (cleanedData.weeks?.[0]?.startDate !== synchronized.weeks?.[0]?.startDate) {
+            if (cleanedData.weeks?.[0]?.startDate !== synchronized.weeks?.[0]?.startDate && !isCustomHorizonRef.current) {
               setDoc(docRef, synchronized, { merge: true }).catch(err => {
                 console.error('Failed to sync rolled weeks to Firestore:', err);
               });
             }
           }
         } else {
-          // Document does not exist yet; seed it with current team default data
-          const initialData = syncRollingWeeksAndAllocations(getDefaultTeamData(currentTeamId));
+          // Never overwrite Firestore when a local cache miss occurs before server response
+          if (isFromCache) {
+            return;
+          }
+          // Document does not exist on server; check snapshots first before falling back to default data
+          const snaps = await fetchTeamSnapshots(currentTeamId);
+          if (isCancelled) return;
+          const validSnap = snaps.find(s => s.data && !isCorruptedFactoryData(s.data, currentTeamId));
+          const baseData = validSnap?.data || getDefaultTeamData(currentTeamId);
+          const initialData = syncRollingWeeksAndAllocations(normalizeTeamData(baseData, currentTeamId));
           lastSavedJsonRef.current = JSON.stringify(initialData);
-          setDoc(docRef, initialData).catch(err => {
+          setDoc(docRef, initialData, { merge: true }).catch(err => {
             console.error('Error seeding initial team Firestore doc:', err);
           });
           setAppData(initialData);
@@ -353,13 +463,17 @@ export default function App() {
         setIsInitialLoad(false);
       },
       (error) => {
+        if (isCancelled) return;
         console.error('Firestore snapshot listener error for team:', error);
         setCloudStatus('error');
         setIsInitialLoad(false);
       }
     );
 
-    return () => unsubscribe();
+    return () => {
+      isCancelled = true;
+      unsubscribe();
+    };
   }, [currentTeamId]);
 
   // 3. Save active team changes to Firestore and localStorage
@@ -367,9 +481,16 @@ export default function App() {
     if (!isRemoteLoadedRef.current || isInitialLoad) {
       return;
     }
+    if (isCorruptedFactoryData(appData, currentTeamId)) {
+      return;
+    }
+
+    const currentJson = JSON.stringify(appData);
+    if (currentJson === lastSavedJsonRef.current) {
+      return;
+    }
 
     // Sync to team-specific localStorage
-    const currentJson = JSON.stringify(appData);
     try {
       localStorage.setItem(`tracker_team_${currentTeamId}`, currentJson);
       localStorage.setItem('tracker_active_team_id', currentTeamId);
@@ -377,9 +498,6 @@ export default function App() {
       console.error('Failed to persist team to localStorage', e);
     }
 
-    if (currentJson === lastSavedJsonRef.current) {
-      return;
-    }
     setCloudStatus('syncing');
     const docId = getTeamDocId(currentTeamId);
     const docRef = doc(db, FIRESTORE_COLLECTION, docId);
@@ -398,6 +516,9 @@ export default function App() {
   // Automatically roll forward when a new week arrives or tab is focused
   useEffect(() => {
     const handleCheckWeek = () => {
+      if (!isRemoteLoadedRef.current || isCustomHorizonRef.current) {
+        return;
+      }
       setAppData(prev => {
         const next = syncRollingWeeksAndAllocations(prev);
         if (next.weeks?.[0]?.startDate !== prev.weeks?.[0]?.startDate) {
@@ -482,15 +603,16 @@ export default function App() {
   const staffLoadStats = useMemo(() => {
     return sortedStaff.map(staff => {
       let sumTotal = 0;
-      const weekLoads: Record<string, { total: number; hasChanged: boolean; items: AllocationItem[] }> = {};
+      const weekLoads: Record<string, { total: number; hasChanged: boolean; hasExpired: boolean; items: AllocationItem[] }> = {};
 
       active2Weeks.forEach(w => {
         const key = `${staff.id}_${w.id}`;
         const list = appData.allocations[key] || [];
         const sum = list.reduce((acc, p) => acc + (Number(p.percent) || 0), 0);
         const hasChanged = list.some(p => p.changed);
+        const hasExpired = list.some(p => isAllocationExpired(p, w.startDate));
         sumTotal += sum;
-        weekLoads[w.id] = { total: sum, hasChanged, items: list };
+        weekLoads[w.id] = { total: sum, hasChanged, hasExpired, items: list };
       });
 
       const avg = active2Weeks.length > 0 ? Math.round(sumTotal / active2Weeks.length) : 0;
@@ -796,16 +918,29 @@ export default function App() {
   const handleCopyFromPrevWeek = () => {
     if (!modalStaffId || !modalWeekId) return;
     const currentWeekIndex = appData.weeks.findIndex(w => w.id === modalWeekId);
-    if (currentWeekIndex <= 0) {
-      showToast('No previous week found in schedule to copy from');
-      return;
+    if (currentWeekIndex < 0) return;
+
+    let prevWeekId: string;
+    let prevWeekLabel: string;
+
+    if (currentWeekIndex > 0) {
+      const prevWeek = appData.weeks[currentWeekIndex - 1];
+      prevWeekId = prevWeek.id;
+      prevWeekLabel = prevWeek.label;
+    } else {
+      const currWeek = appData.weeks[0];
+      const currStart = parseDateIso(currWeek.startDate);
+      const prevStart = new Date(currStart.getFullYear(), currStart.getMonth(), currStart.getDate() - 7);
+      const prevEnd = new Date(prevStart.getFullYear(), prevStart.getMonth(), prevStart.getDate() + 4, 23, 59, 59);
+      prevWeekId = `w_${formatDateIso(prevStart)}`;
+      prevWeekLabel = formatWeekLabel(prevStart, prevEnd);
     }
-    const prevWeek = appData.weeks[currentWeekIndex - 1];
-    const prevKey = `${modalStaffId}_${prevWeek.id}`;
+
+    const prevKey = `${modalStaffId}_${prevWeekId}`;
     const prevAllocations = appData.allocations[prevKey];
 
     if (!prevAllocations || prevAllocations.length === 0) {
-      showToast(`No allocations recorded in previous week (${prevWeek.label})`);
+      showToast(`No allocations recorded in previous week (${prevWeekLabel})`);
       return;
     }
 
@@ -821,51 +956,45 @@ export default function App() {
       endDateType: item.endDateType || 'date',
       endDate: item.endDate || ''
     })));
-    showToast(`Copied allocations from ${prevWeek.label}`);
+    showToast(`Copied allocations from ${prevWeekLabel}`);
   };
 
   // Copy helper 2: Duplicate To Next Week
   const handleDuplicateToNextWeek = () => {
     if (!modalStaffId || !modalWeekId) return;
     const currentWeekIndex = appData.weeks.findIndex(w => w.id === modalWeekId);
+    if (currentWeekIndex < 0) return;
     
-    let targetWeek: WeekHorizon;
-    let nextWeeks = [...appData.weeks];
+    let targetWeekId: string;
+    let targetWeekLabel: string;
 
-    if (currentWeekIndex === appData.weeks.length - 1) {
+    if (currentWeekIndex >= appData.weeks.length - 1) {
       const lastWeek = appData.weeks[currentWeekIndex];
       const prevStart = parseDateIso(lastWeek.startDate);
       const nextStart = new Date(prevStart.getFullYear(), prevStart.getMonth(), prevStart.getDate() + 7);
       const nextEnd = new Date(nextStart.getFullYear(), nextStart.getMonth(), nextStart.getDate() + 4, 23, 59, 59);
-
       const nextIsoStart = formatDateIso(nextStart);
-      const nextIsoEnd = formatDateIso(nextEnd);
-
-      const newWeekId = `w_${nextIsoStart}`;
-      targetWeek = {
-        id: newWeekId,
-        label: formatWeekLabel(nextStart, nextEnd),
-        startDate: nextIsoStart,
-        endDate: nextIsoEnd,
-        archived: false,
-      };
-      nextWeeks.push(targetWeek);
+      targetWeekId = `w_${nextIsoStart}`;
+      targetWeekLabel = formatWeekLabel(nextStart, nextEnd);
     } else {
-      targetWeek = appData.weeks[currentWeekIndex + 1];
+      const targetWeek = appData.weeks[currentWeekIndex + 1];
+      targetWeekId = targetWeek.id;
+      targetWeekLabel = targetWeek.label;
     }
 
-    const nextKey = `${modalStaffId}_${targetWeek.id}`;
+    const nextKey = `${modalStaffId}_${targetWeekId}`;
     const currentValidRows = modalRows.filter(r => r.project.trim() !== '');
+    const currentSaved = buildSavedListForCurrentModal();
 
     const nextAppData: AppData = {
       ...appData,
-      weeks: nextWeeks,
       allocations: {
         ...appData.allocations,
+        ...(currentSaved ? { [currentSaved.key]: currentSaved.updatedList } : {}),
         [nextKey]: currentValidRows.map(r => ({ 
           project: r.project.trim(), 
           percent: Number(r.percent) || 0, 
-          changed: r.changed || false,
+          changed: false,
           endDateType: r.endDateType || 'date',
           endDate: r.endDate || ''
         })),
@@ -873,16 +1002,14 @@ export default function App() {
     };
 
     persistAppData(nextAppData);
-    showToast(`Duplicated allocations to next week (${targetWeek.label})`);
+    showToast(`Duplicated allocations to next week (${targetWeekLabel})`);
   };
 
   // Copy all current week allocations to next week for all staff members
   const handleCopyAllToNextWeek = () => {
     if (active2Weeks.length < 2) return;
     const [currentW, nextW] = active2Weeks;
-    if (!window.confirm(`Copy all current week (${currentW.label}) allocations to next week (${nextW.label}) for the entire team?`)) {
-      return;
-    }
+    setConfirmCopyAll(false);
 
     const updatedAllocations: Record<string, AllocationItem[]> = { ...appData.allocations };
     appData.staff.forEach(staff => {
@@ -909,12 +1036,12 @@ export default function App() {
     return modalRows.reduce((acc, row) => acc + (Number(row.percent) || 0), 0);
   }, [modalRows]);
 
-  const handleSaveAllocations = (customToastMsg?: string | React.MouseEvent | React.SyntheticEvent) => {
-    if (!modalStaffId || !modalWeekId) return;
+  const buildSavedListForCurrentModal = (): { key: string; updatedList: AllocationItem[]; hasDiff: boolean } | null => {
+    if (!modalStaffId || !modalWeekId) return null;
     const key = `${modalStaffId}_${modalWeekId}`;
     const oldList = appData.allocations[key] || [];
 
-    const updatedList = modalRows
+    const updatedList: AllocationItem[] = modalRows
       .filter(r => r.project.trim() !== '')
       .map(r => {
         const projName = r.project.trim();
@@ -959,11 +1086,58 @@ export default function App() {
         };
       });
 
+    const hasDiff = JSON.stringify(updatedList) !== JSON.stringify(oldList);
+    return { key, updatedList, hasDiff };
+  };
+
+  const handleSwitchModalWeek = (targetWeekId: string) => {
+    if (!modalStaffId || !targetWeekId || targetWeekId === modalWeekId) return;
+
+    let latestAllocations = appData.allocations;
+    const saved = buildSavedListForCurrentModal();
+    if (saved && saved.hasDiff) {
+      latestAllocations = {
+        ...appData.allocations,
+        [saved.key]: saved.updatedList,
+      };
+      persistAppData({
+        ...appData,
+        allocations: latestAllocations,
+      });
+    }
+
+    const targetKey = `${modalStaffId}_${targetWeekId}`;
+    const list = latestAllocations[targetKey] || [
+      { project: 'Course Maintenance', percent: 15, changed: false, endDateType: 'ongoing' },
+    ];
+    setModalWeekId(targetWeekId);
+    setDraggedRowIndex(null);
+    setDragOverRowIndex(null);
+    setModalRows(
+      list.map(item => ({
+        ...item,
+        isNew: false,
+        initialPercent: item.percent,
+        initialEndDateType: item.endDateType || 'date',
+        initialEndDate: item.endDate || '',
+        initialChanged: item.changed || false,
+        userToggledChanged: false,
+        endDateType: item.endDateType || 'date',
+        endDate: item.endDate || '',
+        changed: item.changed || false,
+      }))
+    );
+  };
+
+  const handleSaveAllocations = (customToastMsg?: string | React.MouseEvent | React.SyntheticEvent) => {
+    const saved = buildSavedListForCurrentModal();
+    if (!saved) return;
+
     const nextAppData: AppData = {
       ...appData,
       allocations: {
         ...appData.allocations,
-        [key]: updatedList,
+        [saved.key]: saved.updatedList,
       },
     };
 
@@ -1107,7 +1281,7 @@ export default function App() {
 
   const handleRemoveStaffMember = (id: string, name: string) => {
     if (appData.staff.length <= 1) {
-      alert('You must have at least one team member.');
+      showToast('You must have at least one team member');
       return;
     }
     setAppData(prev => {
@@ -1143,6 +1317,9 @@ export default function App() {
   const handleSelectTeam = (teamId: string) => {
     if (teamId === currentTeamId) return;
     isRemoteLoadedRef.current = false;
+    isCustomHorizonRef.current = false;
+    setIsCustomHorizon(false);
+    setConfirmCopyAll(false);
     setIsInitialLoad(true);
     setCurrentTeamId(teamId);
     try {
@@ -1154,11 +1331,21 @@ export default function App() {
       const cached = localStorage.getItem(`tracker_team_${teamId}`);
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (parsed && Array.isArray(parsed.staff) && parsed.staff.length > 0) {
+        if (
+          parsed &&
+          Array.isArray(parsed.staff) &&
+          parsed.staff.length > 0 &&
+          !isCorruptedFactoryData(parsed, teamId)
+        ) {
           const synchronized = syncRollingWeeksAndAllocations(parsed);
           lastSavedJsonRef.current = JSON.stringify(synchronized);
           setAppData(synchronized);
+        } else if (isCorruptedFactoryData(parsed, teamId)) {
+          localStorage.removeItem(`tracker_team_${teamId}`);
+          setAppData(syncRollingWeeksAndAllocations(getDefaultTeamData(teamId)));
         }
+      } else {
+        setAppData(syncRollingWeeksAndAllocations(getDefaultTeamData(teamId)));
       }
     } catch (e) {}
     const target = teamsList.find(t => t.id === teamId);
@@ -1288,6 +1475,24 @@ export default function App() {
 
       {/* Main Grid Content */}
       <main className="max-w-7xl mx-auto p-6 flex-1 w-full space-y-6">
+        {isCustomHorizon && (
+          <div className="bg-amber-50 border border-amber-300 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3 text-xs text-amber-900 shadow-2xs">
+            <div className="flex items-center gap-2 font-medium">
+              <RotateCcw className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+              <span>
+                Viewing custom schedule horizon (<strong>{active2Weeks.map(w => w.label).join(' & ')}</strong>). Automatic week-rolling is paused while viewing this date range.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleRevertToDate(formatDateIso(new Date()))}
+              className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition-colors cursor-pointer shrink-0"
+            >
+              Return to Current Week
+            </button>
+          </div>
+        )}
+
         {/* Top 4 KPI Metrics */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {/* Card 1: Active Team */}
@@ -1356,17 +1561,43 @@ export default function App() {
                 <span>Workload Breakdown Grid</span>
               </h2>
               <div className="flex items-center flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopyAllToNextWeek}
-                  className="text-[11px] bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 px-2.5 py-1 rounded-md text-slate-700 font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
-                  title="Copy all current week active allocations to next week for the whole team"
-                >
-                  <ExternalLink className="w-3 h-3 text-blue-600" />
-                  <span>Copy All to Next Week</span>
-                </button>
+                {confirmCopyAll ? (
+                  <div className="flex items-center gap-1.5 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-md text-[11px]">
+                    <span className="text-blue-900 font-semibold">Copy current week to next week for all?</span>
+                    <button
+                      type="button"
+                      onClick={handleCopyAllToNextWeek}
+                      className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded cursor-pointer transition-colors"
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmCopyAll(false)}
+                      className="px-2 py-0.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-semibold rounded cursor-pointer transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmCopyAll(true)}
+                    className="text-[11px] bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 px-2.5 py-1 rounded-md text-slate-700 font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
+                    title="Copy all current week active allocations to next week for the whole team"
+                  >
+                    <ExternalLink className="w-3 h-3 text-blue-600" />
+                    <span>Copy All to Next Week</span>
+                  </button>
+                )}
                 <span className="text-[10px] bg-amber-50 border border-amber-200 px-2 py-1 rounded-md text-amber-700 font-bold flex items-center gap-1">
                   <Zap className="w-3 h-3 text-amber-500 fill-amber-500" /> Changed
+                </span>
+                <span
+                  className="text-[10px] bg-rose-50 border border-rose-200 px-2 py-1 rounded-md text-rose-700 font-bold flex items-center gap-1"
+                  title="Projects with expired end dates are preserved and highlighted so you can extend the date or delete them"
+                >
+                  <AlertTriangle className="w-3 h-3 text-rose-600" /> Expired Date
                 </span>
                 <select
                   id="gridCapacityFilter"
@@ -1440,11 +1671,12 @@ export default function App() {
                           </td>
 
                           {active2Weeks.map(w => {
-                            const weekData = weekLoads[w.id] || { total: 0, hasChanged: false, items: [] };
+                            const weekData = weekLoads[w.id] || { total: 0, hasChanged: false, hasExpired: false, items: [] };
                             const sum = weekData.total;
                             const isOver = sum > 100;
                             const isTarget = sum >= 80 && sum <= 100;
                             const changedItems = (weekData.items || []).filter(p => p.changed);
+                            const expiredItems = (weekData.items || []).filter(p => isAllocationExpired(p, w.startDate));
                             const changedTooltip = changedItems.length > 0
                               ? `Changed projects:\n${changedItems.map(p => {
                                   let endInfo = '';
@@ -1454,6 +1686,9 @@ export default function App() {
                                   return `• ${p.project}: ${p.percent}%${endInfo}`;
                                 }).join('\n')}`
                               : 'Recently changed';
+                            const expiredTooltip = expiredItems.length > 0
+                              ? `Expired project end date(s) — click to extend or delete:\n${expiredItems.map(p => `• ${p.project}: ${p.percent}% (Expired: ${p.endDate})`).join('\n')}`
+                              : 'Project end date expired';
 
                             let pillStyle = 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:border-blue-300';
                             if (isOver) {
@@ -1533,6 +1768,57 @@ export default function App() {
                                             );
                                           })}
                                         </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                  {weekData.hasExpired && (
+                                    <div className="relative group/expired inline-flex items-center">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleOpenAllocationModal(staff.id, w.id);
+                                        }}
+                                        className="px-1.5 py-0.5 rounded-md bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 transition-colors cursor-pointer flex items-center gap-1"
+                                        title={expiredTooltip}
+                                      >
+                                        <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                        <span className="text-[10px] font-bold">{expiredItems.length}</span>
+                                      </button>
+                                      {/* Expired Projects Popover */}
+                                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover/expired:flex flex-col z-50 bg-slate-900 text-white text-[11px] py-2.5 px-3.5 rounded-xl shadow-xl border border-rose-500/50 min-w-[260px] max-w-xs text-left">
+                                        <div className="flex items-center justify-between gap-2 border-b border-slate-700 pb-1.5 mb-1.5">
+                                          <div className="flex items-center gap-1.5 text-rose-400 font-bold">
+                                            <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                                            <span>Expired Project Date(s)</span>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleOpenAllocationModal(staff.id, w.id);
+                                            }}
+                                            className="text-[10px] text-white bg-rose-600 hover:bg-rose-500 px-2 py-0.5 rounded cursor-pointer transition-colors font-semibold"
+                                          >
+                                            Extend / Edit
+                                          </button>
+                                        </div>
+                                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                                          {expiredItems.map((ep, idx) => (
+                                            <div key={idx} className="flex items-start justify-between gap-3 text-slate-200">
+                                              <div className="flex flex-col min-w-0 flex-1">
+                                                <span className="font-semibold text-white leading-tight break-words">{ep.project}</span>
+                                                <span className="text-[10px] text-rose-300 font-medium mt-0.5 whitespace-nowrap">
+                                                  Expired: {ep.endDate}
+                                                </span>
+                                              </div>
+                                              <span className="font-bold text-rose-300 shrink-0 text-xs">{ep.percent}%</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                        <p className="text-[10px] text-slate-400 mt-2 pt-1.5 border-t border-slate-800">
+                                          Click to extend the project end date or delete the row.
+                                        </p>
                                       </div>
                                     </div>
                                   )}
@@ -1618,6 +1904,12 @@ export default function App() {
                         })
                     );
                     const hasChanged = memberChangedItems.length > 0;
+                    const memberExpiredItems = active2Weeks.flatMap(w =>
+                      (stat.weekLoads[w.id]?.items || [])
+                        .filter(p => isAllocationExpired(p, w.startDate))
+                        .map(p => `${p.project} (Expired: ${p.endDate})`)
+                    );
+                    const hasExpired = memberExpiredItems.length > 0;
                     
                     let barColor = 'bg-blue-600';
                     if (isOver) barColor = 'bg-rose-500';
@@ -1632,12 +1924,21 @@ export default function App() {
                           }
                         }}
                         className="flex items-center gap-3 cursor-pointer group hover:bg-slate-50 p-1.5 rounded-lg transition-colors"
-                        title={hasChanged ? `Changed: ${memberChangedItems.join(', ')}` : "Click to view & edit workload allocations"}
+                        title={
+                          hasExpired
+                            ? `Expired project date(s): ${memberExpiredItems.join(', ')}`
+                            : hasChanged
+                            ? `Changed: ${memberChangedItems.join(', ')}`
+                            : 'Click to view & edit workload allocations'
+                        }
                       >
-                        <div className="w-20 text-[11px] font-bold text-slate-600 uppercase truncate group-hover:text-blue-600 transition-colors flex items-center gap-1">
+                        <div className="w-24 text-[11px] font-bold text-slate-600 uppercase truncate group-hover:text-blue-600 transition-colors flex items-center gap-1">
                           <span className="truncate">{stat.staff.name}</span>
                           {hasChanged && (
                             <Zap className="w-3 h-3 text-amber-500 fill-amber-500 shrink-0" title={`Changed: ${memberChangedItems.join(', ')}`} />
+                          )}
+                          {hasExpired && (
+                            <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" title={`Expired date: ${memberExpiredItems.join(', ')}`} />
                           )}
                         </div>
                         <div className="flex-1 h-3 flex rounded-full overflow-hidden bg-slate-100">
@@ -1690,54 +1991,116 @@ export default function App() {
         >
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-5xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
             {/* Modal Header */}
-            <div className="p-5 bg-slate-900 text-white flex items-center justify-between">
+            <div className="p-5 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3.5">
-                <div id="modalStaffBadge" className="w-11 h-11 rounded-xl bg-blue-600 font-bold flex items-center justify-center text-white text-lg shadow-xs">
+                <div id="modalStaffBadge" className="w-11 h-11 rounded-xl bg-blue-600 font-bold flex items-center justify-center text-white text-lg shadow-xs shrink-0">
                   {currentModalStaff.name.substring(0, 1).toUpperCase()}
                 </div>
                 <div>
                   <h3 id="modalTitle" className="text-base font-bold text-white leading-tight">
                     Workload for {currentModalStaff.name.toUpperCase()}
                   </h3>
-                  <p id="modalSubtitle" className="text-xs text-slate-300 font-normal mt-0.5">
-                    {currentModalWeek.label}
-                  </p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <p id="modalSubtitle" className="text-xs text-slate-300 font-normal">
+                      {currentModalWeek.label}
+                    </p>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                      active2Weeks[0]?.id === currentModalWeek.id
+                        ? 'bg-blue-500/20 text-blue-300 border border-blue-400/30'
+                        : 'bg-slate-700 text-slate-200 border border-slate-600'
+                    }`}>
+                      {active2Weeks[0]?.id === currentModalWeek.id ? 'Current Week' : 'Next Week'}
+                    </span>
+                  </div>
                 </div>
               </div>
-              <button
-                id="closeAllocationModalBtn"
-                type="button"
-                onClick={() => handleSaveAllocations('Allocations auto-saved')}
-                className="text-slate-400 hover:text-white cursor-pointer p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
-                title="Save & Close"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            {/* Copy Helper Bar */}
-            <div className="bg-white border-b border-slate-200 px-5 py-3 flex items-center gap-3 flex-wrap">
-              <span className="text-xs font-semibold text-slate-500">Copy helper:</span>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
+                {/* Week Horizon Segmented Toggle */}
+                {active2Weeks.length >= 2 && (
+                  <div className="flex items-center bg-slate-800 p-1 rounded-xl border border-slate-700">
+                    {active2Weeks.map((w, idx) => {
+                      const isActiveWeek = w.id === currentModalWeek.id;
+                      const horizonLabel = idx === 0 ? 'Current Week' : 'Next Week';
+                      return (
+                        <button
+                          key={w.id}
+                          type="button"
+                          onClick={() => handleSwitchModalWeek(w.id)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                            isActiveWeek
+                              ? 'bg-blue-600 text-white shadow-xs'
+                              : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
+                          }`}
+                          title={`Switch to ${horizonLabel} (${w.label})`}
+                        >
+                          <span>{horizonLabel}</span>
+                          <span className={`text-[10px] font-normal ${isActiveWeek ? 'text-blue-100' : 'text-slate-400'}`}>
+                            ({w.label})
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <button
+                  id="closeAllocationModalBtn"
                   type="button"
-                  id="copyPrevWeekBtn"
-                  onClick={handleCopyFromPrevWeek}
-                  className="px-3.5 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-xs font-semibold flex items-center gap-2 cursor-pointer transition-colors shadow-2xs"
+                  onClick={() => handleSaveAllocations('Allocations auto-saved')}
+                  className="text-slate-400 hover:text-white cursor-pointer p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+                  title="Save & Close"
                 >
-                  <ArrowDownToLine className="w-3.5 h-3.5 text-blue-600" />
-                  <span>Copy From Prev Week</span>
-                </button>
-                <button
-                  type="button"
-                  id="duplicateNextWeekBtn"
-                  onClick={handleDuplicateToNextWeek}
-                  className="px-3.5 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-xs font-semibold flex items-center gap-2 cursor-pointer transition-colors shadow-2xs"
-                >
-                  <ExternalLink className="w-3.5 h-3.5 text-blue-600" />
-                  <span>Duplicate To Next Week</span>
+                  <X className="w-5 h-5" />
                 </button>
               </div>
+            </div>
+
+            {/* Copy Helper & Week Toggle Bar */}
+            <div className="bg-white border-b border-slate-200 px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-xs font-semibold text-slate-500">Copy helper:</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    id="copyPrevWeekBtn"
+                    onClick={handleCopyFromPrevWeek}
+                    className="px-3.5 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-xs font-semibold flex items-center gap-2 cursor-pointer transition-colors shadow-2xs"
+                  >
+                    <ArrowDownToLine className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Copy From Prev Week</span>
+                  </button>
+                  <button
+                    type="button"
+                    id="duplicateNextWeekBtn"
+                    onClick={handleDuplicateToNextWeek}
+                    className="px-3.5 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-xs font-semibold flex items-center gap-2 cursor-pointer transition-colors shadow-2xs"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Duplicate To Next Week</span>
+                  </button>
+                </div>
+              </div>
+
+              {active2Weeks.length >= 2 && (
+                <button
+                  type="button"
+                  id="toggleModalWeekBtn"
+                  onClick={() => {
+                    const otherWeek = active2Weeks.find(w => w.id !== currentModalWeek.id);
+                    if (otherWeek) handleSwitchModalWeek(otherWeek.id);
+                  }}
+                  className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 rounded-lg text-xs font-bold flex items-center gap-2 cursor-pointer transition-colors shadow-2xs whitespace-nowrap"
+                  title="Toggle between Current Week and Next Week"
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5 text-blue-600" />
+                  <span>
+                    {active2Weeks[0]?.id === currentModalWeek.id
+                      ? `Switch to Next Week (${active2Weeks[1]?.label})`
+                      : `Switch to Current Week (${active2Weeks[0]?.label})`}
+                  </span>
+                </button>
+              )}
             </div>
 
             {/* Table Column Headers */}
@@ -1761,6 +2124,17 @@ export default function App() {
 
             {/* Scrollable Editable Project Rows */}
             <div className="px-5 space-y-3 max-h-[50vh] overflow-y-auto custom-scrollbar pb-2 pt-2 sm:pt-0">
+              {modalRows.some(r => isAllocationExpired(r, currentModalWeek.startDate)) && (
+                <div className="flex items-center justify-between gap-2 text-xs text-rose-900 bg-rose-50 border border-rose-300 px-3.5 py-2.5 rounded-xl font-semibold mb-1">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>
+                      {modalRows.filter(r => isAllocationExpired(r, currentModalWeek.startDate)).length} project(s) have an expired end date — extend the date below (or switch to Ongoing), or click the trash icon to delete.
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {modalRows.some(r => r.changed) && (
                 <div className="flex items-center justify-between gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 px-3.5 py-2 rounded-xl font-semibold mb-1">
                   <div className="flex items-center gap-1.5">
@@ -1785,6 +2159,7 @@ export default function App() {
                   modalRows.map((row, idx) => {
                     const isDraggingThis = draggedRowIndex === idx;
                     const isDropTarget = dragOverRowIndex === idx && draggedRowIndex !== idx;
+                    const isExpiredRow = isAllocationExpired(row, currentModalWeek.startDate);
 
                     return (
                       <div 
@@ -1799,6 +2174,8 @@ export default function App() {
                             ? 'opacity-40 border-2 border-dashed border-blue-400 bg-blue-50/40 shadow-inner' 
                             : isDropTarget
                             ? 'border-2 border-blue-500 bg-blue-50/70 ring-2 ring-blue-200 shadow-md translate-y-0.5'
+                            : isExpiredRow
+                            ? 'bg-rose-50/70 border-2 border-rose-300 hover:border-rose-400 shadow-2xs'
                             : row.changed 
                             ? 'bg-amber-50/50 border border-amber-200 hover:border-amber-300' 
                             : 'bg-slate-50/50 border border-slate-200/70 hover:border-slate-300'
@@ -1823,7 +2200,9 @@ export default function App() {
                               onChange={e => handleRowChange(idx, 'project', e.target.value)}
                               placeholder="Project name (e.g. LMS Migration)"
                               className={`w-full px-3 py-2 text-sm font-semibold text-slate-800 bg-white border ${
-                                row.changed 
+                                isExpiredRow
+                                  ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-100'
+                                  : row.changed 
                                   ? 'border-amber-300 focus:border-amber-500 focus:ring-amber-100' 
                                   : 'border-slate-200 hover:border-slate-300 focus:border-blue-500 focus:ring-blue-100'
                               } rounded-xl outline-none focus:ring-2 transition-all shadow-2xs`}
@@ -1836,7 +2215,7 @@ export default function App() {
                           <span className="sm:hidden text-[10px] font-extrabold text-slate-700 uppercase tracking-wider mb-1">
                             Project End Date
                           </span>
-                          <div className="flex items-center gap-2 w-full min-w-0">
+                          <div className="flex items-center gap-1.5 w-full min-w-0 flex-wrap sm:flex-nowrap">
                             <select
                               value={row.endDateType || 'date'}
                               onChange={e => handleRowChange(idx, 'endDateType', e.target.value)}
@@ -1849,7 +2228,7 @@ export default function App() {
                             </select>
 
                             {(!row.endDateType || row.endDateType === 'date') && (
-                              <div className="relative flex-1 min-w-[155px]">
+                              <div className="relative flex-1 min-w-[145px] flex items-center gap-1.5">
                                 <input
                                   type="date"
                                   value={row.endDate || ''}
@@ -1864,9 +2243,22 @@ export default function App() {
                                       (e.currentTarget as any).showPicker?.();
                                     } catch {}
                                   }}
-                                  className="w-full px-2.5 py-1.5 text-xs font-medium text-slate-800 bg-white border border-slate-200 hover:border-slate-300 focus:border-blue-500 rounded-xl outline-none focus:ring-2 focus:ring-blue-100 shadow-2xs cursor-pointer tracking-normal"
-                                  title="Click anywhere to open calendar"
+                                  className={`w-full px-2.5 py-1.5 text-xs rounded-xl outline-none focus:ring-2 shadow-2xs cursor-pointer tracking-normal ${
+                                    isExpiredRow
+                                      ? 'font-bold text-rose-900 bg-rose-50 border-2 border-rose-400 hover:border-rose-500 focus:border-rose-600 focus:ring-rose-100'
+                                      : 'font-medium text-slate-800 bg-white border border-slate-200 hover:border-slate-300 focus:border-blue-500 focus:ring-blue-100'
+                                  }`}
+                                  title={isExpiredRow ? 'Project end date has expired — click to extend date' : 'Click anywhere to open calendar'}
                                 />
+                                {isExpiredRow && (
+                                  <span
+                                    className="px-1.5 py-0.5 bg-rose-600 text-white text-[9px] font-extrabold uppercase tracking-wider rounded-md shrink-0 flex items-center gap-1 shadow-2xs"
+                                    title="This project's end date has passed. Extend the date or delete the project."
+                                  >
+                                    <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                                    <span>Expired</span>
+                                  </span>
+                                )}
                               </div>
                             )}
 
@@ -1934,8 +2326,12 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() => handleRemoveProjectRow(idx)}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors shrink-0"
-                              title="Remove task"
+                              className={`p-1.5 rounded-lg cursor-pointer transition-colors shrink-0 ${
+                                isExpiredRow
+                                  ? 'text-rose-600 bg-rose-100 hover:bg-rose-600 hover:text-white'
+                                  : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                              }`}
+                              title={isExpiredRow ? 'Delete expired project' : 'Remove task'}
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>

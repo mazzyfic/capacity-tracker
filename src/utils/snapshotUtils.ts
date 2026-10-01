@@ -8,8 +8,13 @@ import {
   deleteDoc,
 } from 'firebase/firestore';
 import { AppData, DataSnapshot } from '../types';
+import { formatDateIso } from './dateUtils';
+import { isCorruptedFactoryData } from './helpers';
 
 export const SNAPSHOTS_COLLECTION = 'capacity_snapshots';
+
+// In-memory cache to avoid redundant Firestore getDoc calls on every real-time emission within the same day
+const verifiedDailySnapshotsCache = new Set<string>();
 
 export async function createTeamSnapshot(
   teamId: string,
@@ -17,16 +22,17 @@ export async function createTeamSnapshot(
   data: AppData,
   name?: string,
   description?: string,
-  isAuto: boolean = false
+  isAuto: boolean = false,
+  customId?: string
 ): Promise<DataSnapshot> {
   const now = new Date();
-  const dateIso = now.toISOString().split('T')[0];
+  const dateIso = formatDateIso(now);
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
   
-  const id = isAuto 
+  const id = customId || (isAuto 
     ? `auto_${teamId}_${dateIso}`
-    : `snap_${teamId}_${Date.now()}`;
+    : `snap_${teamId}_${Date.now()}`);
 
   const snapshotName = name || (isAuto 
     ? `Daily Snapshot: ${dateStr}`
@@ -57,17 +63,48 @@ export async function checkAndCreateDailyAutoSnapshot(
   data: AppData
 ): Promise<void> {
   if (!data || !data.staff || data.staff.length === 0) return;
+  // Never poison daily backups with obsolete generic factory data
+  if (isCorruptedFactoryData(data, teamId)) return;
   
   try {
-    const todayIso = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const todayIso = formatDateIso(now);
+    const utcIso = now.toISOString().split('T')[0];
+    const cacheKey = `${teamId}_${todayIso}_${utcIso}`;
+
+    if (verifiedDailySnapshotsCache.has(cacheKey)) {
+      return;
+    }
+
     const autoDocId = `auto_${teamId}_${todayIso}`;
     const snapRef = doc(db, SNAPSHOTS_COLLECTION, autoDocId);
     const existing = await getDoc(snapRef);
     
-    // If today's auto-snapshot doesn't exist, create it as the baseline!
-    if (!existing.exists()) {
-      await createTeamSnapshot(teamId, teamTitle, data, undefined, undefined, true);
+    // If today's auto-snapshot doesn't exist, or was poisoned by factory data, create/heal it!
+    if (!existing.exists() || isCorruptedFactoryData((existing.data() as DataSnapshot)?.data, teamId)) {
+      await createTeamSnapshot(teamId, teamTitle, data, undefined, undefined, true, autoDocId);
     }
+
+    // Also check if a UTC-dated snapshot for today/tomorrow was poisoned by factory data and heal it
+    if (utcIso !== todayIso) {
+      const utcDocId = `auto_${teamId}_${utcIso}`;
+      const utcSnapRef = doc(db, SNAPSHOTS_COLLECTION, utcDocId);
+      const utcExisting = await getDoc(utcSnapRef);
+      if (utcExisting.exists() && isCorruptedFactoryData((utcExisting.data() as DataSnapshot)?.data, teamId)) {
+        const existingSnap = utcExisting.data() as DataSnapshot;
+        await createTeamSnapshot(
+          teamId,
+          teamTitle,
+          data,
+          existingSnap.name,
+          existingSnap.description,
+          true,
+          utcDocId
+        );
+      }
+    }
+
+    verifiedDailySnapshotsCache.add(cacheKey);
   } catch (err) {
     console.warn('Failed to perform daily auto-snapshot check:', err);
   }
@@ -83,6 +120,10 @@ export async function fetchTeamSnapshots(teamId: string): Promise<DataSnapshot[]
       const item = docSnap.data() as DataSnapshot;
       // Match current team or legacy default team
       if (item.teamId === teamId || (!item.teamId && teamId === 'team_mazzy')) {
+        // Exclude any corrupted factory snapshots from the restore list
+        if (isCorruptedFactoryData(item.data, teamId)) {
+          return;
+        }
         list.push({
           ...item,
           id: docSnap.id,

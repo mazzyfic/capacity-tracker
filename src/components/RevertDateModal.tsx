@@ -68,6 +68,7 @@ export const RevertDateModal: React.FC<RevertDateModalProps> = ({
   const [isReverting, setIsReverting] = useState(false);
   const [isCreatingSnap, setIsCreatingSnap] = useState(false);
   const [deletingSnapId, setDeletingSnapId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [newSnapName, setNewSnapName] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -93,6 +94,7 @@ export const RevertDateModal: React.FC<RevertDateModalProps> = ({
       setSuccessMessage(null);
       setErrorMessage(null);
       setShowCreateForm(false);
+      setConfirmDeleteId(null);
       setNewSnapName('');
       setSelectedCustomDate(getDefaultRevertDate());
       loadSnapshots();
@@ -202,8 +204,8 @@ export const RevertDateModal: React.FC<RevertDateModalProps> = ({
 
   // Delete snapshot
   const handleDeleteSnapshot = async (snapId: string, snapName: string) => {
-    if (!window.confirm(`Delete snapshot "${snapName}"? This cannot be undone.`)) return;
     setDeletingSnapId(snapId);
+    setConfirmDeleteId(null);
     try {
       await deleteTeamSnapshot(snapId);
       setSnapshots((prev) => prev.filter((s) => s.id !== snapId));
@@ -426,15 +428,35 @@ export const RevertDateModal: React.FC<RevertDateModalProps> = ({
                           </button>
 
                           {!isAuto && (
-                            <button
-                              type="button"
-                              disabled={deletingSnapId === snap.id}
-                              onClick={() => handleDeleteSnapshot(snap.id, snap.name)}
-                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                              title="Delete snapshot"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            confirmDeleteId === snap.id ? (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  disabled={deletingSnapId === snap.id}
+                                  onClick={() => handleDeleteSnapshot(snap.id, snap.name)}
+                                  className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
+                                >
+                                  Confirm
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteId(null)}
+                                  className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-semibold rounded-lg transition-colors cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={deletingSnapId === snap.id}
+                                onClick={() => setConfirmDeleteId(snap.id)}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                title="Delete snapshot"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )
                           )}
                         </div>
                       </div>

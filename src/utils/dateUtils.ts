@@ -65,17 +65,26 @@ export function getRolling2Weeks(baseDate: Date = new Date()): WeekHorizon[] {
 }
 
 /**
- * Filter items that are still active for a given week start date.
- * - 'ongoing' items always continue
- * - 'secondary_tasks' always continue
- * - 'date' items continue if their endDate >= weekStartDate
+ * Checks whether a dated project allocation has an endDate that has passed
+ * (either before today or before the given week's startDate).
  */
-export function filterActiveAllocations(items: AllocationItem[], weekStartDate: string): AllocationItem[] {
+export function isAllocationExpired(item: AllocationItem, weekStartDate?: string): boolean {
+  if (!item) return false;
+  const type = item.endDateType || 'date';
+  if (type !== 'date' || !item.endDate) return false;
+  const todayIso = formatDateIso(new Date());
+  const cutoffIso = weekStartDate && weekStartDate > todayIso ? weekStartDate : todayIso;
+  return item.endDate < cutoffIso;
+}
+
+/**
+ * Filter valid non-empty project allocations when rolling or copying between weeks.
+ * Note: Dated projects whose endDate has passed are intentionally preserved (not auto-removed)
+ * so users can see them highlighted as expired and choose whether to extend or delete them.
+ */
+export function filterActiveAllocations(items: AllocationItem[], _weekStartDate?: string): AllocationItem[] {
   return items.filter(item => {
-    if (!item.project || item.project.trim() === '') return false;
-    if (item.endDateType === 'date' && item.endDate) {
-      return item.endDate >= weekStartDate;
-    }
+    if (!item || !item.project || item.project.trim() === '') return false;
     return true;
   });
 }
@@ -108,8 +117,8 @@ export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate?: Dat
   const currentWeeks = prevData.weeks || [];
   const updatedAllocations: Record<string, AllocationItem[]> = { ...(prevData.allocations || {}) };
 
-  const staffList = (prevData.staff || []).slice().sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+  const staffList = (prevData.staff || []).filter(Boolean).slice().sort((a, b) =>
+    (a?.name || '').localeCompare(b?.name || '', undefined, { sensitivity: 'base' })
   );
 
   staffList.forEach(staff => {
@@ -130,7 +139,8 @@ export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate?: Dat
           .filter(k => k.startsWith(`${staff.id}_`))
           .sort();
         if (staffKeys.length > 0) {
-          currentItems = updatedAllocations[staffKeys[staffKeys.length - 1]];
+          const latestItems = updatedAllocations[staffKeys[staffKeys.length - 1]] || [];
+          currentItems = filterActiveAllocations(latestItems, currentWeek.startDate);
         }
       }
 
@@ -156,8 +166,7 @@ export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate?: Dat
         nextItems = updatedAllocations[`${staff.id}_${matchedNext.id}`];
       } else {
         // Filter out expired date items when rolling to next week
-        const currentActive = filterActiveAllocations(updatedAllocations[currentKey] || [], nextWeek.startDate);
-        nextItems = currentActive.length > 0 ? currentActive : updatedAllocations[currentKey];
+        nextItems = filterActiveAllocations(updatedAllocations[currentKey] || [], nextWeek.startDate);
       }
 
       if (!nextItems || nextItems.length === 0) {

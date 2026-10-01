@@ -379,7 +379,14 @@ export const RevertDateModal: React.FC<RevertDateModalProps> = ({
                         });
 
                     const staffCount = snap.data?.staff?.length || 0;
-                    const weekLabels = snap.data?.weeks?.map((w) => w.label).join(' & ') || 'Standard horizon';
+                    const weekLabels =
+                      snap.data?.weeks
+                        ?.map((w) =>
+                          w.startDate && w.endDate
+                            ? formatWeekLabel(parseDateIso(w.startDate), parseDateIso(w.endDate))
+                            : w.label
+                        )
+                        .join(' & ') || 'Standard horizon';
 
                     return (
                       <div

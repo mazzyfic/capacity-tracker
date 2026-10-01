@@ -20,6 +20,7 @@ import {
   RotateCcw, 
   AlertTriangle,
   ArrowLeftRight,
+  Calendar,
 } from 'lucide-react';
 import { 
   StaffMember, 
@@ -36,6 +37,7 @@ import {
   isAllocationExpired,
   parseDateIso,
   formatDateIso,
+  formatDisplayDate,
   formatWeekLabel,
   getMondayOfWeek
 } from './utils/dateUtils';
@@ -1682,12 +1684,12 @@ export default function App() {
                                   let endInfo = '';
                                   if (p.endDateType === 'ongoing') endInfo = ' (Ongoing)';
                                   else if (p.endDateType === 'secondary_tasks') endInfo = ' (Secondary Tasks)';
-                                  else if (p.endDate) endInfo = ` (End: ${p.endDate})`;
+                                  else if (p.endDate) endInfo = ` (End: ${formatDisplayDate(p.endDate)})`;
                                   return `• ${p.project}: ${p.percent}%${endInfo}`;
                                 }).join('\n')}`
                               : 'Recently changed';
                             const expiredTooltip = expiredItems.length > 0
-                              ? `Expired project end date(s) — click to extend or delete:\n${expiredItems.map(p => `• ${p.project}: ${p.percent}% (Expired: ${p.endDate})`).join('\n')}`
+                              ? `Expired project end date(s) — click to extend or delete:\n${expiredItems.map(p => `• ${p.project}: ${p.percent}% (Expired: ${formatDisplayDate(p.endDate)})`).join('\n')}`
                               : 'Project end date expired';
 
                             let pillStyle = 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:border-blue-300';
@@ -1751,7 +1753,7 @@ export default function App() {
                                             let endBadge = '';
                                             if (cp.endDateType === 'ongoing') endBadge = 'Ongoing';
                                             else if (cp.endDateType === 'secondary_tasks') endBadge = 'Secondary Tasks';
-                                            else if (cp.endDate) endBadge = cp.endDate;
+                                            else if (cp.endDate) endBadge = formatDisplayDate(cp.endDate);
 
                                             return (
                                               <div key={idx} className="flex items-start justify-between gap-3 text-slate-200">
@@ -1809,7 +1811,7 @@ export default function App() {
                                               <div className="flex flex-col min-w-0 flex-1">
                                                 <span className="font-semibold text-white leading-tight break-words">{ep.project}</span>
                                                 <span className="text-[10px] text-rose-300 font-medium mt-0.5 whitespace-nowrap">
-                                                  Expired: {ep.endDate}
+                                                  Expired: {formatDisplayDate(ep.endDate)}
                                                 </span>
                                               </div>
                                               <span className="font-bold text-rose-300 shrink-0 text-xs">{ep.percent}%</span>
@@ -1899,7 +1901,7 @@ export default function App() {
                           let endInfo = '';
                           if (p.endDateType === 'ongoing') endInfo = ' (Ongoing)';
                           else if (p.endDateType === 'secondary_tasks') endInfo = ' (Secondary Tasks)';
-                          else if (p.endDate) endInfo = ` (End: ${p.endDate})`;
+                          else if (p.endDate) endInfo = ` (End: ${formatDisplayDate(p.endDate)})`;
                           return `${p.project} (${p.percent}%)${endInfo}`;
                         })
                     );
@@ -1907,7 +1909,7 @@ export default function App() {
                     const memberExpiredItems = active2Weeks.flatMap(w =>
                       (stat.weekLoads[w.id]?.items || [])
                         .filter(p => isAllocationExpired(p, w.startDate))
-                        .map(p => `${p.project} (Expired: ${p.endDate})`)
+                        .map(p => `${p.project} (Expired: ${formatDisplayDate(p.endDate)})`)
                     );
                     const hasExpired = memberExpiredItems.length > 0;
                     
@@ -2228,28 +2230,38 @@ export default function App() {
                             </select>
 
                             {(!row.endDateType || row.endDateType === 'date') && (
-                              <div className="relative flex-1 min-w-[145px] flex items-center gap-1.5">
-                                <input
-                                  type="date"
-                                  value={row.endDate || ''}
-                                  onChange={e => handleRowChange(idx, 'endDate', e.target.value)}
-                                  onClick={(e) => {
-                                    try {
-                                      (e.currentTarget as any).showPicker?.();
-                                    } catch {}
-                                  }}
-                                  onFocus={(e) => {
-                                    try {
-                                      (e.currentTarget as any).showPicker?.();
-                                    } catch {}
-                                  }}
-                                  className={`w-full px-2.5 py-1.5 text-xs rounded-xl outline-none focus:ring-2 shadow-2xs cursor-pointer tracking-normal ${
-                                    isExpiredRow
-                                      ? 'font-bold text-rose-900 bg-rose-50 border-2 border-rose-400 hover:border-rose-500 focus:border-rose-600 focus:ring-rose-100'
-                                      : 'font-medium text-slate-800 bg-white border border-slate-200 hover:border-slate-300 focus:border-blue-500 focus:ring-blue-100'
-                                  }`}
-                                  title={isExpiredRow ? 'Project end date has expired — click to extend date' : 'Click anywhere to open calendar'}
-                                />
+                              <div className="relative flex-1 min-w-[155px] flex items-center gap-1.5">
+                                <div className="relative flex-1 min-w-[130px]">
+                                  <div
+                                    className={`w-full px-2.5 py-1.5 text-xs rounded-xl shadow-2xs flex items-center justify-between gap-1.5 pointer-events-none ${
+                                      isExpiredRow
+                                        ? 'font-bold text-rose-900 bg-rose-50 border-2 border-rose-400'
+                                        : 'font-semibold text-slate-800 bg-white border border-slate-200'
+                                    }`}
+                                  >
+                                    <span className={row.endDate ? '' : 'text-slate-400 font-normal'}>
+                                      {row.endDate ? formatDisplayDate(row.endDate) : 'Mmm, DD YYYY'}
+                                    </span>
+                                    <Calendar className={`w-3.5 h-3.5 shrink-0 ${isExpiredRow ? 'text-rose-600' : 'text-slate-400'}`} />
+                                  </div>
+                                  <input
+                                    type="date"
+                                    value={row.endDate || ''}
+                                    onChange={e => handleRowChange(idx, 'endDate', e.target.value)}
+                                    onClick={(e) => {
+                                      try {
+                                        (e.currentTarget as any).showPicker?.();
+                                      } catch {}
+                                    }}
+                                    onFocus={(e) => {
+                                      try {
+                                        (e.currentTarget as any).showPicker?.();
+                                      } catch {}
+                                    }}
+                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                    title={isExpiredRow ? `Project end date has expired (${formatDisplayDate(row.endDate)}) — click to extend date` : 'Click anywhere to open calendar'}
+                                  />
+                                </div>
                                 {isExpiredRow && (
                                   <span
                                     className="px-1.5 py-0.5 bg-rose-600 text-white text-[9px] font-extrabold uppercase tracking-wider rounded-md shrink-0 flex items-center gap-1 shadow-2xs"

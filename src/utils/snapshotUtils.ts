@@ -28,15 +28,14 @@ export async function createTeamSnapshot(
   const now = new Date();
   const dateIso = formatDateIso(now);
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  const dateStr = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
   
   const id = customId || (isAuto 
     ? `auto_${teamId}_${dateIso}`
     : `snap_${teamId}_${Date.now()}`);
 
   const snapshotName = name || (isAuto 
-    ? `Daily Snapshot: ${dateStr}`
-    : `Manual Snapshot: ${dateStr} (${timeStr})`);
+    ? `Daily Snapshot: ${dateIso}`
+    : `Manual Snapshot: ${dateIso} (${timeStr})`);
 
   const snapshotDesc = description || (isAuto
     ? `Automated daily insurance snapshot of ${teamTitle} (${data.staff?.length || 0} staff members).`

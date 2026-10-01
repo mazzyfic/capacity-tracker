@@ -1,4 +1,5 @@
 import { AppData, AllocationItem } from '../types';
+import { formatDisplayDate } from './dateUtils';
 
 const LEGACY_FACTORY_PROJECTS = new Set([
   // Legacy Mazzy factory placeholders
@@ -136,7 +137,7 @@ export function formatAllocationDetail(item: AllocationItem): string {
   } else if (item.endDateType === 'secondary_tasks') {
     endInfo = ' (Secondary Tasks)';
   } else if (item.endDate) {
-    endInfo = ` (End: ${item.endDate})`;
+    endInfo = ` (End: ${formatDisplayDate(item.endDate)})`;
   }
 
   return `${projName}: ${pct}%${endInfo}`;

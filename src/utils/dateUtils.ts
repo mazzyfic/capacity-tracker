@@ -21,15 +21,43 @@ export function formatDateIso(d: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-export function formatWeekLabel(startDate: Date, endDate: Date): string {
-  const startMonth = startDate.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-  const endMonth = endDate.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-  const startDay = startDate.getDate();
-  const endDay = endDate.getDate();
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-  if (startMonth === endMonth) {
-    return `${startMonth} ${startDay} - ${startMonth} ${endDay}`;
+/**
+ * Formats any Date or ISO date string into "Mmm, DD YYYY" (e.g., "Nov, 01 2026").
+ */
+export function formatDisplayDate(input: Date | string | undefined | null): string {
+  if (!input) return '';
+  let d: Date;
+  if (input instanceof Date) {
+    d = input;
+  } else if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      d = parseDateIso(trimmed);
+    } else {
+      d = new Date(trimmed);
+    }
+  } else {
+    return '';
   }
+
+  if (isNaN(d.getTime())) {
+    return typeof input === 'string' ? input : '';
+  }
+
+  const mmm = MONTH_ABBR[d.getMonth()];
+  const dd = String(d.getDate()).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${mmm}, ${dd} ${yyyy}`;
+}
+
+export function formatWeekLabel(startDate: Date, endDate: Date): string {
+  const startMonth = MONTH_ABBR[startDate.getMonth()];
+  const endMonth = MONTH_ABBR[endDate.getMonth()];
+  const startDay = String(startDate.getDate()).padStart(2, '0');
+  const endDay = String(endDate.getDate()).padStart(2, '0');
+
   return `${startMonth} ${startDay} - ${endMonth} ${endDay}`;
 }
 
@@ -108,7 +136,10 @@ export function syncRollingWeeksAndAllocations(prevData: AppData, baseDate?: Dat
     prevData.weeks[1]?.id &&
     prevData.weeks[0].startDate === currentWorkWeekIso
   ) {
-    rollingWeeks = prevData.weeks;
+    rollingWeeks = prevData.weeks.map(w => ({
+      ...w,
+      label: formatWeekLabel(parseDateIso(w.startDate), parseDateIso(w.endDate)),
+    }));
   } else {
     rollingWeeks = getRolling2Weeks(new Date());
   }
